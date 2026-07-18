@@ -1,0 +1,47 @@
+# Bring the certificate server up:
+#
+#   cd docker && cp .env.example .env && $EDITOR .env && docker compose up --build
+#
+# The build context is the repository root so the image can copy server/.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: trust
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-trust}
+      POSTGRES_DB: trust
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trust -d trust"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published by default: nothing outside this network needs the
+    # database, and a Postgres on a laptop's public port is how accidents
+    # happen.  Uncomment to inspect it with psql from the host.
+    # ports:
+    #   - "127.0.0.1:5432:5432"
+
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      DATABASE_URL: postgres://trust:${POSTGRES_PASSWORD:-trust}@db:5432/trust
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env}
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?set GITHUB_CLIENT_ID in .env}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?set GITHUB_CLIENT_SECRET in .env}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8099}
+      APP_URL: ${APP_URL:-http://localhost:5173}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    ports:
+      - "${SERVER_PORT:-8099}:8080"
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  pgdata:

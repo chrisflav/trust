@@ -6,3 +6,9 @@ node_modules
 /web/public/index
 # Personal working marks; `trust export --marks` points at whichever file you use.
 /trust-marks.json
+
+# Server env: secrets, never committed.
+/docker/.env
+
+# Compiled server output.
+/server/dist

@@ -7,6 +7,15 @@ name = "aftk"
 git = "https://github.com/mathlib-initiative/aftk"
 rev = "main"
 
+# Pinned to the branch that builds against this toolchain.  `main` is still on
+# v4.30.0; a trust certificate is only meaningful if the hash it names can be
+# recomputed, so the revision this was hashed with matters and is not tracked
+# loosely.
+[[require]]
+name = "semantic_hash"
+git = "https://github.com/chrisflav/semantic_hash"
+rev = "bump-lean-v4.31.0"
+
 [[lean_lib]]
 name = "Trust"
 

@@ -148,6 +148,54 @@ content hash still needs Lean, so a declaration protected from the UI reads as
 merges the existing snapshot history on every write, so editing from the browser
 never discards hashes the browser does not know about.
 
+## Trust certificates (server)
+
+A certificate is one person's assertion about one declaration, keyed by its
+**semantic hash** rather than its name.  `semantic_hash` computes that over the
+definitional closure, so a declaration's hash incorporates the hashes of
+everything it references: vouching for a hash vouches for the whole subtree
+beneath it, and any change in meaning underneath invalidates the certificate on
+its own.  It also makes certificates portable — one written against Mathlib at
+one commit applies anywhere that declaration still hashes the same.
+
+The hash is deliberately blind to anything that is not meaning.  `trust
+hash-invariants` checks this rather than asserting it: renaming a declaration or
+its binders, or making an argument implicit instead of explicit, leaves the hash
+untouched, while genuinely different definitions still differ.
+
+Bring the server up:
+
+```bash
+cd docker
+cp .env.example .env      # fill in SESSION_SECRET and a GitHub OAuth app
+docker compose up --build
+```
+
+Postgres is not published to the host, and the server runs unprivileged.
+
+### What the server is, and is not
+
+It is a place to publish and find certificates.  It is **not** a trusted party:
+
+* **Private keys are never uploaded.**  Signing happens on the machine that
+  holds the key; the server takes public keys only, and refuses anything that
+  looks like a private one.
+* **Signature checks are a cache, not the authority.**  Every certificate is
+  returned with the canonical bytes that were signed, so a client can repeat the
+  check itself.  A compromised server can withhold certificates or fabricate
+  `attested` ones — it cannot forge a `signed` one.
+* **Trust is not transitive.**  Trusting someone counts their certificates and
+  nobody else's; it never silently enrols the people they trust.
+
+| assurance | means |
+|---|---|
+| `signed` | an OpenPGP signature over the claim verified against the issuer's key |
+| `attested` | a signed-in GitHub account asserted it, on this server's word alone |
+
+A key also records whether it was found among the account's published GitHub
+keys (`github`) or merely uploaded here (`self`), which is a materially
+different claim about who owns it.
+
 ### Index layout
 
 ```

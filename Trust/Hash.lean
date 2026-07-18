@@ -1,6 +1,7 @@
 import Lean
 import Trust.Graph
 import Trust.Marks
+import SemanticHash
 
 /-!
 # Fingerprinting a declaration's content
@@ -86,8 +87,45 @@ def structuralHasher : Hasher where
           | _ => 0
       return some (toHex (mixHash64 kindHash (mixHash64 typeHash valueHash)))
 
+/--
+The semantic hash, from `semantic_hash`.
+
+This is the one trust certificates are written against, because it is the only
+one whose equality means anything to a *reader*: it is computed over the
+definitional closure, so a declaration's hash incorporates the hashes of
+everything it references, transitively.  Vouching for a hash therefore vouches
+for the whole subtree beneath it, and any change in meaning underneath
+invalidates the certificate on its own.
+
+Deliberately blind to things that are not meaning:
+
+* the declaration's own name — it never enters its hash, so a rename is invisible;
+* the names of the constants it references — those contribute their *hashes*;
+* binder names, and whether an argument is implicit or explicit;
+* constructor names within an inductive family.
+
+Those are `HashOptions`' defaults, which the on-demand path uses; `trust
+hash-invariants` checks them against real declarations rather than trusting the
+documentation.
+
+One thing this is *not*: proof-irrelevant.  `runFor` hashes the dependency cone
+on demand and is proof-relevant, so re-proving a lemma changes its hash even
+though its statement is untouched — the proof-irrelevant variant exists but only
+as a whole-environment pass.  For protection that is arguably right, a changed
+proof being a changed proof; for certificates it is stricter than it needs to
+be, and is worth revisiting once the certificate format is settled.  The name
+records the choice so that hashes made under a different one are never compared
+against these.
+-/
+def semanticHasher : Hasher where
+  name := "semantic-v1"
+  hash env declName := do
+    if (env.find? declName).isNone then return none
+    let hashes ← SemanticHash.Hashing.runFor env #[declName]
+    return (hashes[declName]?).map toHex
+
 /-- The hasher used unless another is chosen. -/
-def defaultHasher : Hasher := structuralHasher
+def defaultHasher : Hasher := semanticHasher
 
 /-- What checking a protected declaration turned up. -/
 inductive ProtectionStatus where
