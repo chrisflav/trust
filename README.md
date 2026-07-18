@@ -3,6 +3,17 @@
 Estimating the trust debt of a Lean statement: what it definitionally rests on,
 and what rests on it.  See [DESIGN.md](DESIGN.md) for the goals.
 
+> [!WARNING]
+> **Experimental, LLM-generated, and not reviewed by a human.**
+>
+> This code was written by an LLM (Claude).  No human has read it line by line,
+> and the performance and correctness claims in this README were measured by the
+> same process that wrote the code — they have not been independently checked.
+>
+> The point of this tool is to help you decide what to trust.  Do not extend that
+> trust to the tool: read the code before relying on any of it, and treat what it
+> reports as a question worth checking rather than an answer.
+
 Dependency analysis builds on [aftk](https://github.com/mathlib-initiative/aftk);
 what trust adds is the *definitional* view — edges rather than a flat set,
 dependencies of the **statement** rather than of statement-and-proof together,
@@ -168,3 +179,7 @@ cd web && npm test
 
 The frontend suite includes a check against a real exported index, which is
 skipped when none has been generated.
+
+## License
+
+[Apache License 2.0](LICENSE).
