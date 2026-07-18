@@ -1,0 +1,10 @@
+name = "trust"
+version = "0.1.0"
+defaultTargets = ["trust"]
+
+[[lean_lib]]
+name = "Trust"
+
+[[lean_exe]]
+name = "trust"
+root = "Main"
