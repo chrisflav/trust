@@ -2,9 +2,15 @@ name = "trust"
 version = "0.1.0"
 defaultTargets = ["trust"]
 
+[[require]]
+name = "aftk"
+git = "https://github.com/mathlib-initiative/aftk"
+rev = "main"
+
 [[lean_lib]]
 name = "Trust"
 
 [[lean_exe]]
 name = "trust"
 root = "Main"
+supportInterpreter = true

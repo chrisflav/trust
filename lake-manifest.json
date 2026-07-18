@@ -1,0 +1,16 @@
+{"version": "1.2.0",
+ "packagesDir": ".lake/packages",
+ "packages":
+ [{"url": "https://github.com/mathlib-initiative/aftk",
+   "type": "git",
+   "subDir": null,
+   "scope": "",
+   "rev": "41f8b2183831f225640daa43f76f469329408e8e",
+   "name": "aftk",
+   "manifestFile": "lake-manifest.json",
+   "inputRev": "main",
+   "inherited": false,
+   "configFile": "lakefile.toml"}],
+ "name": "trust",
+ "lakeDir": ".lake",
+ "fixedToolchain": false}

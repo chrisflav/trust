@@ -1,0 +1,1211 @@
+:root {
+  --bg: #fbfbfa;
+  --panel: #ffffff;
+  --border: #e3e1dc;
+  --text: #1d1c1a;
+  --muted: #77736c;
+  --accent: #2f6f5e;
+  --data: #2f6f5e;
+  --prop: #6b6f8a;
+  --axiom: #a1523c;
+  --selected: #e8f0ed;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16171a;
+    --panel: #1d1f23;
+    --border: #2f3237;
+    --text: #e8e6e1;
+    --muted: #8b8983;
+    --accent: #6fbfa5;
+    --data: #6fbfa5;
+    --prop: #9aa0c4;
+    --axiom: #d98c72;
+    --selected: #23342f;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+}
+
+code,
+.decl-name,
+.result-name,
+svg text {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.app {
+  max-width: 1500px;
+  margin: 0 auto;
+  padding: 20px;
+}
+
+.app-message {
+  max-width: 700px;
+  margin: 80px auto;
+  padding: 0 20px;
+}
+
+.error {
+  color: var(--axiom);
+}
+
+.progress {
+  height: 6px;
+  margin: 18px 0 10px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 3px;
+  transition: width 120ms linear;
+}
+
+/* Before the first byte, and while the index is being built, there is no
+   fraction to show — only that the page is still working. */
+.progress-fill.indeterminate {
+  width: 35%;
+  animation: progress-sweep 1.1s ease-in-out infinite;
+}
+
+@keyframes progress-sweep {
+  0% {
+    margin-left: -35%;
+  }
+  100% {
+    margin-left: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .progress-fill.indeterminate {
+    width: 100%;
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+/* The closure count arrives a moment after the drawing does; keep it quiet so
+   the caption does not flicker between two equally loud states. */
+.counting {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.progress-detail {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 12px;
+}
+
+h1 {
+  font-size: 20px;
+  margin: 0;
+  letter-spacing: -0.01em;
+}
+
+.meta {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.controls {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+  margin: 16px 0;
+}
+
+.search {
+  flex: 1;
+  min-width: 260px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 14px;
+}
+
+.repos {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.chip {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.chip.on {
+  background: var(--selected);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  gap: 20px;
+  align-items: start;
+}
+
+.results {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  max-height: 78vh;
+  overflow-y: auto;
+}
+
+.result {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.result:hover {
+  background: var(--selected);
+}
+
+.result.active {
+  background: var(--selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+.result-name {
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.result-module {
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.badge {
+  display: inline-block;
+  min-width: 34px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border: 1px solid currentColor;
+}
+
+.badge.data {
+  color: var(--data);
+}
+
+.badge.prop {
+  color: var(--prop);
+}
+
+.badge.axiom {
+  color: var(--axiom);
+}
+
+.decl-header {
+  padding: 12px 0;
+}
+
+.decl-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.decl-title h2 {
+  margin: 0;
+  font-size: 18px;
+  font-family: ui-monospace, monospace;
+}
+
+.decl-module {
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.decl-flags {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+
+.flag {
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  background: var(--selected);
+  color: var(--muted);
+}
+
+.flag.data {
+  color: var(--data);
+}
+
+.flag.prop {
+  color: var(--prop);
+}
+
+.flag.sorry,
+.flag.axioms {
+  color: var(--axiom);
+}
+
+.code-pane {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 10px 14px;
+  margin-bottom: 14px;
+  max-height: 320px;
+  overflow: auto;
+}
+
+.code {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.code-sep {
+  color: var(--muted);
+  font-family: ui-monospace, monospace;
+  font-size: 12.5px;
+  margin: 2px 0;
+}
+
+.code-note {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+  margin-top: 6px;
+}
+
+.tok-keyword {
+  color: var(--prop);
+  font-weight: 600;
+}
+
+.tok-literal {
+  color: var(--axiom);
+}
+
+.tok-const.known {
+  color: var(--accent);
+  cursor: pointer;
+  border-bottom: 1px dotted currentColor;
+}
+
+.tok-const.known:hover {
+  background: var(--selected);
+}
+
+.direction {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0 14px;
+}
+
+.direction button {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.direction button.on {
+  background: var(--selected);
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.direction label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.panes {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.pane {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 12px;
+}
+
+.pane h3 {
+  margin: 0 0 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.tree-pane {
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 1px 0;
+}
+
+.twisty {
+  width: 18px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+}
+
+.twisty:disabled {
+  cursor: default;
+  opacity: 0.4;
+}
+
+.decl-name {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  padding: 0;
+  font-size: 12.5px;
+  text-align: left;
+}
+
+.decl-name:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.count {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.via {
+  color: var(--muted);
+  font-size: 9px;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  padding: 0 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.show-more {
+  margin: 4px 0 4px 16px;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.show-more:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.truncated {
+  color: var(--axiom);
+}
+
+.legend-line {
+  display: inline-block;
+  width: 16px;
+  border-top: 1.5px solid var(--border);
+  vertical-align: middle;
+  margin: 0 3px 0 8px;
+}
+
+.legend-line.body {
+  border-top-style: dashed;
+}
+
+.graph-scroll {
+  overflow: auto;
+  max-height: 70vh;
+}
+
+.graph-caption {
+  color: var(--muted);
+  font-size: 11px;
+  padding-top: 8px;
+}
+
+.edge {
+  fill: none;
+  stroke: var(--border);
+  stroke-width: 1.2;
+}
+
+.edge.body {
+  stroke-dasharray: 3 3;
+  opacity: 0.75;
+}
+
+.edge.highlight {
+  stroke: var(--accent);
+  stroke-width: 2;
+}
+
+.arrowhead {
+  fill: var(--border);
+}
+
+.node {
+  cursor: pointer;
+}
+
+.node rect {
+  fill: var(--panel);
+  stroke: var(--prop);
+  stroke-width: 1.2;
+}
+
+.node.data rect {
+  stroke: var(--data);
+}
+
+.node.axiom rect {
+  stroke: var(--axiom);
+  stroke-width: 2;
+}
+
+.node.root rect {
+  fill: var(--selected);
+  stroke-width: 2.5;
+}
+
+.node.selected rect {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.node text {
+  fill: var(--text);
+  font-size: 11px;
+  text-anchor: middle;
+  pointer-events: none;
+}
+
+/* What sits *below* a trusted declaration recedes: the judgement already covers
+   it, so it is drawn muted and dashed.  The trusted node itself is not muted —
+   in another declaration's graph it is a real dependency and reads normally.
+   Placed after the kind rules so it overrides their stroke colours, but before
+   `.root`/`.selected`, which still need to win. */
+/* Trusted: a light green field.  The border already says what kind of
+   declaration it is, so vouching for one is said with the background instead,
+   and both facts stay readable at once. */
+.node.trusted rect {
+  fill: color-mix(in srgb, var(--data) 15%, var(--panel));
+}
+
+@media (prefers-color-scheme: dark) {
+  .node.trusted rect {
+    fill: color-mix(in srgb, var(--data) 24%, var(--panel));
+  }
+}
+
+/* Picking a node asks what it touches.  Everything else recedes rather than
+   vanishing, so the shape of the graph around it can still be read. */
+.node.unconnected {
+  opacity: 0.2;
+}
+
+.edge.off-path {
+  opacity: 0.1;
+}
+
+.node.beneath-trusted rect {
+  fill: var(--bg);
+  stroke: var(--muted);
+  stroke-width: 1.2;
+  stroke-dasharray: 4 3;
+}
+
+.node.beneath-trusted text {
+  fill: var(--muted);
+}
+
+.edge.beneath-trusted {
+  opacity: 0.35;
+}
+
+
+/* The root and the selection stay legible whatever else is true of them: which
+   node you are looking at matters more than how it was reached. */
+.node.beneath-trusted.root rect,
+.node.beneath-trusted.selected rect {
+  stroke-dasharray: none;
+}
+
+.node.beneath-trusted.root rect {
+  fill: var(--selected);
+  stroke: var(--muted);
+  stroke-width: 2.5;
+}
+
+.node.beneath-trusted.selected rect {
+  stroke: var(--accent);
+  stroke-width: 2.5;
+}
+
+.node.beneath-trusted.root text,
+.node.beneath-trusted.selected text {
+  fill: var(--text);
+}
+
+/* Human judgements: recorded by a person, not derived from the environment,
+   so they are given their own panel rather than mixed in with the flags. */
+.marks {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.marks-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.marks h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.marks-readonly,
+.marks-empty {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.marks-flags {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.mark {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.mark.trusted {
+  color: var(--data);
+  border-color: var(--data);
+}
+
+.mark.protection.ok {
+  color: var(--data);
+  border-color: var(--data);
+}
+
+.mark.protection.warn {
+  color: var(--prop);
+  border-color: var(--prop);
+}
+
+/* A protected declaration that no longer matches its snapshot is the one thing
+   in this panel that demands attention, so it is the only thing that shouts. */
+.mark.protection.alarm {
+  color: var(--bg);
+  background: var(--axiom);
+  border-color: var(--axiom);
+  font-weight: 600;
+}
+
+.characterization {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+
+.characterization-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.characterization-thm {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 1px 4px 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.mark-drop {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+  padding: 0 3px;
+}
+
+.mark-drop:hover {
+  color: var(--axiom);
+}
+
+.marks-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.marks-actions button {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.marks-actions button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.marks-actions button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* The suggestion list overlays whatever is below it, so the panel does not
+   jump around as matches appear and disappear on every keystroke. */
+.marks-typeahead {
+  position: relative;
+  flex: 1;
+  min-width: 220px;
+}
+
+.marks-suggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+
+.suggestion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.suggestion.on {
+  background: var(--selected);
+}
+
+.suggestion-name {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-module {
+  margin-left: auto;
+  padding-left: 10px;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.marks-input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+}
+
+.marks-hint {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.marks-error {
+  margin: 8px 0 0;
+  color: var(--axiom);
+  font-size: 12px;
+}
+
+.back {
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.back:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.back:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.chip.mode {
+  white-space: nowrap;
+}
+
+/* The row a graph click revealed.  The tree can be hundreds of rows long, so
+   the highlight has to be findable at a glance after scrolling to it. */
+.tree-row.selected {
+  background: var(--selected);
+  border-radius: 6px;
+  outline: 1px solid var(--accent);
+}
+
+/* Rows below a trusted declaration, matching the graph. */
+.tree-row.beneath-trusted .decl-name,
+.tree-row.beneath-trusted .count {
+  color: var(--muted);
+}
+
+.tree-row.beneath-trusted .badge,
+.tree-row.beneath-trusted .via {
+  opacity: 0.55;
+}
+
+/* Written by the author, so it is set as prose rather than as code. */
+.docstring {
+  margin: 0 0 10px;
+  padding: 8px 12px;
+  border-left: 3px solid var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.via.trusted {
+  color: var(--data);
+  border-color: var(--data);
+}
+
+.via.characterized {
+  color: var(--prop);
+  border-color: var(--prop);
+}
+
+.pane-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.expand {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.expand:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* The expanded graph takes the viewport: the whole point is the room, so the
+   controls sit in a bar above and the canvas gets everything else. */
+.graph-expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+}
+
+.graph-expanded-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.graph-expanded-title {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.graph-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.graph-control {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.graph-control input[type='range'] {
+  width: 84px;
+}
+
+.graph-control select {
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 11px;
+}
+
+.graph-control-value {
+  min-width: 42px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.graph-control-group {
+  display: flex;
+  gap: 4px;
+}
+
+.graph-control-group button {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.graph-control-group button.on {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--selected);
+}
+
+.graph-control-group button:hover {
+  border-color: var(--accent);
+}
+
+/* Scrolls in both directions: an unbounded layer is wider than any screen.
+   The pane's own scroller is switched off here so that this element is the one
+   that scrolls — otherwise the graph scrolls inside a box inside a box, and the
+   view cannot centre itself on the drawing. */
+.graph-expanded-canvas {
+  flex: 1;
+  overflow: auto;
+  padding: 16px;
+}
+
+.graph-expanded-canvas .graph-scroll {
+  overflow: visible;
+  max-height: none;
+}
+
+.graph-expanded-canvas .graph-caption {
+  position: sticky;
+  left: 0;
+}
+
+/* A node is 150px of elided name; the preview is what makes it identifiable. */
+.node-preview {
+  position: fixed;
+  z-index: 200;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  pointer-events: auto;
+}
+
+.node-preview-name {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 12px;
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.node-preview-module {
+  color: var(--muted);
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+
+.node-preview-doc {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 8.5em;
+  overflow: hidden;
+}
+
+.node-preview-code {
+  margin: 0;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 11px;
+  line-height: 1.5;
+  max-height: 11em;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.node-preview-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.node-preview-actions button {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.node-preview-actions button:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Hidden declarations are only drawn at all when hiding is switched off, and
+   then they are marked, so that turning it back on is not a surprise. */
+.graph-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px 18px;
+  flex-wrap: wrap;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* Inside the caption the legend is one more clause, not its own bar. */
+.graph-legend.compact {
+  display: inline-flex;
+  padding: 0;
+  border: none;
+  background: none;
+  gap: 4px 12px;
+  margin-left: 10px;
+}
+
+.legend-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.legend-heading {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 9.5px;
+  opacity: 0.75;
+}
+
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 16px;
+  height: 11px;
+  border-radius: 3px;
+  border: 1.4px solid var(--prop);
+  background: var(--panel);
+}
+
+.legend-swatch.data {
+  border-color: var(--data);
+}
+
+.legend-swatch.axiom {
+  border-color: var(--axiom);
+  border-width: 2px;
+}
+
+.legend-swatch.selected {
+  border-color: var(--accent);
+  border-width: 2.4px;
+}
+
+.legend-swatch.dashed {
+  border-style: dashed;
+  border-color: var(--muted);
+}
+
+.legend-swatch.fill-trusted {
+  border-color: var(--data);
+  background: color-mix(in srgb, var(--data) 15%, var(--panel));
+}
+
+.legend-swatch.fill-root {
+  border-color: var(--data);
+  border-width: 2.4px;
+  background: var(--selected);
+}
+
+.graph-expanded-stats {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.node.hidden-decl rect {
+  stroke-dasharray: 2 3;
+  opacity: 0.75;
+}
+
+.node.hidden-decl text {
+  font-style: italic;
+}
+
+.empty {
+  color: var(--muted);
+  padding: 12px;
+}

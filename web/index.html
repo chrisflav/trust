@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>trust</title>
+    <style>
+      /*
+        Enough style to render the boot message, inline so that it needs neither
+        the bundle nor the stylesheet.  Without it the page is blank for as long
+        as the module graph takes to arrive — 2.5 s on a slow connection — with
+        nothing on screen to say that anything is happening.  React replaces the
+        markup below when it mounts.
+      */
+      :root {
+        color-scheme: light dark;
+        --boot-bg: #fbfbfa;
+        --boot-text: #1d1c1a;
+        --boot-muted: #77736c;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --boot-bg: #16171a;
+          --boot-text: #e8e6e1;
+          --boot-muted: #8b8983;
+        }
+      }
+
+      body {
+        margin: 0;
+        background: var(--boot-bg);
+        color: var(--boot-text);
+        font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, sans-serif;
+      }
+
+      .boot {
+        max-width: 700px;
+        margin: 80px auto;
+        padding: 0 20px;
+      }
+
+      .boot p {
+        color: var(--boot-muted);
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root">
+      <div class="boot" role="status" aria-busy="true">
+        <h1>trust</h1>
+        <p>Loading…</p>
+      </div>
+    </div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
