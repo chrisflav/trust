@@ -1,0 +1,19 @@
+# Keep the build context small and free of things an image must never carry.
+# `docker/docker-compose.yml` builds from the repository root, so without this
+# every build would ship the exported indexes — 648 MB of generated data — to
+# the daemon before doing anything.
+
+.git
+node_modules
+**/node_modules
+
+# Generated indexes: hundreds of megabytes, and bind-mounted at run time.
+web/public/index
+web/dist
+server/dist
+.lake
+
+# Secrets and local state.
+docker/.env
+trust-marks.json
+*.tsbuildinfo
