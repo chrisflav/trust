@@ -97,6 +97,13 @@ structure Node where
   axioms : Array String := #[]
   /-- Whether the declaration transitively depends on `sorryAx`. -/
   usesSorry : Bool := false
+  /--
+  Semantic hash, when the index was exported with `--with-hashes`.
+
+  What a trust certificate is keyed by, so carrying it here is what lets the
+  frontend match somebody else's assertion to a declaration on screen.
+  -/
+  hash : String := ""
   deriving Inhabited, ToJson, FromJson
 
 /-- Where an edge came from: the type of a declaration, or its value. -/

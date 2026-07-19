@@ -7,6 +7,7 @@ import Trust.Export
 import Trust.Code
 import Trust.Marks
 import Trust.Hash
+import Trust.Cert
 
 /-!
 # Command line interface
@@ -42,6 +43,11 @@ Usage:
   trust check [options] <module>
   trust sync-marks [options] <module>
   trust marks [options]
+  trust cert issue [options] <module> <declaration>
+  trust cert sign [options] <file>
+  trust cert verify <file>
+  trust cert publish [options] <file>
+  trust hash-invariants <module>
 
 Commands:
   deps          Definitional closure of a declaration's statement, as a JSON graph.
@@ -54,6 +60,7 @@ Commands:
   check         Report protected declarations whose content has changed.
   sync-marks    Refresh an existing index's marks.json without re-exporting it.
   marks         Print the marks file.
+  cert          Issue, sign, verify and publish trust certificates.
 
 Options for deps:
   --depth <n>          Bound expansion depth.  Default: unbounded.
@@ -72,6 +79,8 @@ Options for export:
   -m, --module <pat>   Restrict exported declarations to matching modules.
       --with-bodies    Also export body (proof-term) edges.
       --with-code      Also export rendered, clickable declaration source.
+      --with-hashes    Also record each declaration's semantic hash, so the index
+                       can be matched against trust certificates.
       --fast-prop      Treat exactly the theorems as proofs, skipping MetaM.
 
 Options for trusted, protect, characterize, check and marks:
@@ -84,6 +93,19 @@ Marks are human judgements — what someone decided, not what the environment
 says — so they live in a version-controlled JSON file rather than in a generated
 index, and each records the commit it was made at.  `check` exits non-zero when
 a protected declaration has changed, so it can gate CI.
+
+Options for cert:
+  --repo <name>        Repository the claim is about.  Default: the directory name.
+  --commit <rev>       Revision the claim is about.  Default: the checked-out one.
+  --note <text>        Why you are vouching for it.
+  -o, --out <file>     Write to this file instead of stdout.
+  --key <id>           Which GPG key to sign with, when you have several.
+  --server <url>       Certificate server.  Default: $TRUST_SERVER.
+  --token <token>      API token.  Default: $TRUST_TOKEN.
+
+Signing happens here, by handing the canonical bytes to `gpg` on stdin.  Your
+private key is never read by this program and is never uploaded; the server
+holds public keys only, and verifies rather than being believed.
 
 Module patterns:
   *        Match every module.
@@ -185,6 +207,7 @@ where
     | "--with-bodies" :: rest => go rest { config with withBodies := true } positionals
     | "--fast-prop" :: rest => go rest { config with fastProp := true } positionals
     | "--with-code" :: rest => go rest { config with withCode := true } positionals
+    | "--with-hashes" :: rest => go rest { config with withHashes := true } positionals
     | arg :: value :: rest =>
       if arg == "--out" then
         go rest { config with outDir := value } positionals
@@ -220,6 +243,16 @@ structure MarkOptions where
   remove : Bool := false
   /-- Record this revision instead of the checked-out one. -/
   commit : String := ""
+  /-- Repository a certificate claim is about. -/
+  repo : String := ""
+  /-- Where to write the result, when not stdout. -/
+  out : String := ""
+  /-- Which GPG key to sign with. -/
+  key : String := ""
+  /-- Certificate server base URL. -/
+  server : String := ""
+  /-- API token for the certificate server. -/
+  token : String := ""
 
 /-- Parse the options shared by `trusted`, `protect`, `characterize` and `check`. -/
 def parseMark (args : List String) : Except String (MarkOptions × Array String) :=
@@ -235,11 +268,38 @@ where
       if arg == "--marks" then go rest { opts with marksPath := value } positionals
       else if arg == "--note" then go rest { opts with note := value } positionals
       else if arg == "--commit" then go rest { opts with commit := value } positionals
+      else if arg == "--repo" then go rest { opts with repo := value } positionals
+      else if arg == "-o" || arg == "--out" then go rest { opts with out := value } positionals
+      else if arg == "--key" then go rest { opts with key := value } positionals
+      else if arg == "--server" then go rest { opts with server := value } positionals
+      else if arg == "--token" then go rest { opts with token := value } positionals
       else if arg.startsWith "-" then .error s!"unknown option `{arg}`"
       else go (value :: rest) opts (positionals.push arg)
     | arg :: rest =>
       if arg.startsWith "-" then .error s!"unknown option `{arg}`"
       else go rest opts (positionals.push arg)
+
+/-- An environment variable, or a fallback when it is unset. -/
+def envOr (name fallback : String) : IO String := do
+  return (← IO.getEnv name).getD fallback
+
+/-- Read and parse a certificate file, failing loudly rather than silently. -/
+def readCertificate (path : String) : IO Certificate := do
+  let text ← IO.FS.readFile path
+  match Json.parse text >>= fromJson? with
+  | .ok cert => return cert
+  | .error msg => throw <| IO.userError s!"{path}: {msg}"
+
+/--
+The repository a claim is about, when it was not given.
+
+The working directory's name: `trust` runs inside the repository it is talking
+about, so that is nearly always the answer, and being wrong here is visible
+rather than silent.
+-/
+def defaultRepoName : IO String := do
+  let cwd ← IO.currentDir
+  return cwd.fileName.getD "unknown"
 
 /-- The revision to record: the one asked for, else the checked-out one. -/
 def commitFor (opts : MarkOptions) : IO String :=
@@ -443,6 +503,83 @@ def run (args : List String) : IO UInt32 := do
       let marks ← Marks.load opts.marksPath
       IO.println (toJson marks).pretty
       return 0
+  | "cert" :: sub :: rest =>
+    match parseMark rest with
+    | .error msg =>
+      IO.eprintln s!"error: {msg}"
+      return 1
+    | .ok (opts, positionals) =>
+      match sub with
+      | "issue" =>
+        if positionals.size != 2 then
+          IO.eprintln "error: expected <module> <declaration>"
+          return 1
+        let (env, declName) ← loadAndResolve positionals[0]! positionals[1]!
+        let repo ← if opts.repo.isEmpty then defaultRepoName else pure opts.repo
+        match ← issueClaim env declName repo opts.commit opts.note with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok claim =>
+          let cert : Certificate := { claim }
+          let text := (toJson cert).pretty ++ "\n"
+          if opts.out.isEmpty then IO.print text else IO.FS.writeFile opts.out text
+          IO.eprintln s!"trust: {claim.decl} hashes to {claim.hash} ({claim.hasher})"
+          return 0
+      | "sign" =>
+        if positionals.size != 1 then
+          IO.eprintln "error: expected <file>"
+          return 1
+        let cert ← readCertificate positionals[0]!
+        match ← signClaim cert.claim opts.key with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok signature =>
+          let signed : Certificate := { cert with signature := some signature }
+          let target := if opts.out.isEmpty then positionals[0]! else opts.out
+          IO.FS.writeFile target ((toJson signed).pretty ++ "\n")
+          IO.eprintln s!"trust: signed {cert.claim.decl}, wrote {target}"
+          return 0
+      | "verify" =>
+        if positionals.size != 1 then
+          IO.eprintln "error: expected <file>"
+          return 1
+        let cert ← readCertificate positionals[0]!
+        match cert.signature with
+        | none =>
+          IO.eprintln "error: this certificate is not signed"
+          return 1
+        | some signature =>
+          match ← verifyClaim cert.claim signature with
+          | .error msg =>
+            IO.eprintln s!"BAD      {cert.claim.decl}\n{msg}"
+            return 1
+          | .ok _ =>
+            IO.eprintln s!"ok       {cert.claim.decl} at {cert.claim.hash}"
+            return 0
+      | "publish" =>
+        if positionals.size != 1 then
+          IO.eprintln "error: expected <file>"
+          return 1
+        let cert ← readCertificate positionals[0]!
+        let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
+        let token ← if opts.token.isEmpty then envOr "TRUST_TOKEN" "" else pure opts.token
+        if server.isEmpty || token.isEmpty then
+          IO.eprintln "error: need --server and --token (or TRUST_SERVER and TRUST_TOKEN)"
+          return 1
+        if cert.signature.isNone then
+          IO.eprintln "trust: publishing unsigned; it will be recorded as `attested` only"
+        match ← publishCertificate cert server token with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok response =>
+          IO.println response
+          return 0
+      | other =>
+        IO.eprintln s!"error: unknown cert subcommand `{other}`"
+        return 1
   | cmd :: _ =>
     IO.eprintln s!"error: unknown command `{cmd}`\n\n{helpText}"
     return 1

@@ -1,4 +1,4 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import type { NextFunction, Request, Response } from 'express'
 import { pool } from './db'
 
@@ -53,10 +53,42 @@ export function readSession(request: Request): SessionUser | null {
   }
 }
 
-export function requireUser(request: Request, response: Response, next: NextFunction): void {
-  const user = readSession(request)
+/** Hash a token the way it is stored, so the plaintext is never persisted. */
+export function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+export function newToken(): string {
+  return `trust_${randomBytes(24).toString('base64url')}`
+}
+
+/** Resolve a `Authorization: Bearer` token to the identity that owns it. */
+async function userFromToken(header: string): Promise<SessionUser | null> {
+  const token = header.slice('Bearer '.length).trim()
+  if (token.length === 0) return null
+  const { rows } = await pool.query<{ id: string; login: string }>(
+    `UPDATE api_token SET last_used_at = now()
+       FROM identity
+      WHERE api_token.identity_id = identity.id AND api_token.token_sha256 = $1
+      RETURNING identity.id, identity.login`,
+    [hashToken(token)],
+  )
+  if (rows.length === 0) return null
+  return { id: Number(rows[0].id), login: rows[0].login }
+}
+
+/**
+ * Accept either a browser session or a command-line token.
+ *
+ * The CLI cannot hold a cookie session, and pushing people through a browser to
+ * publish something they just signed locally would make signing the awkward
+ * path rather than the normal one.
+ */
+export async function requireUser(request: Request, response: Response, next: NextFunction): Promise<void> {
+  const header = request.headers.authorization
+  const user = header?.startsWith('Bearer ') ? await userFromToken(header) : readSession(request)
   if (!user) {
-    response.status(401).json({ error: 'sign in with GitHub first' })
+    response.status(401).json({ error: 'sign in with GitHub, or send a Bearer token' })
     return
   }
   ;(request as Request & { user: SessionUser }).user = user

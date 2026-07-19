@@ -59,6 +59,19 @@ CREATE TABLE IF NOT EXISTS certificate (
 -- The hot path: "who trusts this declaration".
 CREATE INDEX IF NOT EXISTS certificate_lookup ON certificate (decl_hash, hasher);
 
+-- Tokens for the command line, which cannot hold a browser cookie session.
+-- Only the hash is stored: a leaked database should not hand anyone the ability
+-- to publish as someone else.  A token says who is publishing; it is not what
+-- makes a certificate trustworthy, since it cannot forge a signature.
+CREATE TABLE IF NOT EXISTS api_token (
+  id           BIGSERIAL PRIMARY KEY,
+  identity_id  BIGINT      NOT NULL REFERENCES identity(id) ON DELETE CASCADE,
+  token_sha256 TEXT        NOT NULL UNIQUE,
+  name         TEXT        NOT NULL DEFAULT '',
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_used_at TIMESTAMPTZ
+);
+
 -- Whose certificates count for you.  Explicit and non-transitive: trusting
 -- someone does not silently enrol everyone they trust.
 CREATE TABLE IF NOT EXISTS trust_list (

@@ -41,6 +41,13 @@ structure ExportConfig where
   withCode : Bool := false
   /-- Marks file to carry into the index, so the frontend can show judgements. -/
   marksPath : String := marksFileName
+  /--
+  Also record each declaration's semantic hash.
+
+  Off by default because it is a whole-environment pass — 63 seconds for Lean
+  core — and only an index that wants to match trust certificates needs it.
+  -/
+  withHashes : Bool := false
   deriving Inhabited
 
 /--
@@ -159,6 +166,14 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
   let declarations := exportedDeclarations env config.filter
   IO.eprintln s!"trust: exporting {declarations.size} declarations from `{config.repo}`"
 
+  -- One pass for the whole environment rather than one call per declaration:
+  -- the hasher shares work across the dependency graph, and asking it 443,614
+  -- separate questions would redo most of it each time.
+  let semanticHashes ← if config.withHashes then do
+      IO.eprintln "trust: computing semantic hashes (one pass over the environment)"
+      SemanticHash.Hashing.run env
+    else pure {}
+
   -- Ids are indices into the declaration table, assigned in traversal order.
   let mut ids : Std.HashMap Name Nat := {}
   for h : i in [0:declarations.size] do
@@ -204,7 +219,8 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
           module := s!"{AFTK.moduleOfD env declName}"
           kind
           isProp
-          isData := !isProp }
+          isData := !isProp
+          hash := (semanticHashes[declName]?).map toHex |>.getD "" }
       declHandle.putStrLn (Json.compress (toJson node))
       for dep in displayableSuccessors env (statementConstants env) declName do
         if let some tgt := ids[dep]? then
@@ -254,6 +270,8 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
     ("bodyEdgeCount", bodyEdges),
     ("hasBodyEdges", config.withBodies),
     ("hasCode", config.withCode),
+    ("hasHashes", config.withHashes),
+    ("hasher", if config.withHashes then defaultHasher.name else ""),
     ("codeShardSize", codeShardSize),
     -- Edge files are flat little-endian int32 (src, tgt) pairs.
     ("edgeFormat", "i32le")

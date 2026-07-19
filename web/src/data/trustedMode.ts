@@ -30,12 +30,22 @@ export function trustedCutSource(
   base: GraphSource,
   marks: MarksIndex,
   root: NodeId | null,
+  /**
+   * Whether a declaration counts as trusted.
+   *
+   * Passed in rather than read off `marks`, because trust has two sources: the
+   * marks you made here, and certificates from people you follow.  The cut has
+   * to honour both, or a federated certificate would colour a node green while
+   * the tree carried on straight through it.
+   */
+  isTrusted?: (id: NodeId) => boolean,
 ): GraphSource {
-  const trusted = new Set<NodeId>()
+  const localTrusted = new Set<NodeId>()
   for (const mark of marks.marks.trusted) {
     const id = base.findByName(mark.name)
-    if (id !== null) trusted.add(id)
+    if (id !== null) localTrusted.add(id)
   }
+  const trusted = { has: (id: NodeId) => localTrusted.has(id) || (isTrusted?.(id) ?? false) }
 
   // Names are resolved once, here, rather than per traversal step: a closure
   // walk asks for a node's children thousands of times.
@@ -109,6 +119,8 @@ export function trustedCutSource(
     code: (id): Promise<DeclCode | null> => base.code(id),
     repos: () => base.repos(),
     repoOf: (id) => base.repoOf(id),
+    hashOf: (id) => base.hashOf(id),
+    idsByHash: (hash) => base.idsByHash(hash),
   }
 }
 

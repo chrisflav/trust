@@ -23,6 +23,8 @@ export interface Decl {
   isData: boolean
   axioms?: string[]
   usesSorry?: boolean
+  /** Semantic hash, when the index was exported with `--with-hashes`. */
+  hash?: string
 }
 
 export interface Edge {
@@ -127,5 +129,8 @@ export interface IndexMeta {
   bodyEdgeCount: number
   hasBodyEdges: boolean
   hasCode?: boolean
+  hasHashes?: boolean
+  /** Which hasher produced the declaration hashes; certificates must match it. */
+  hasher?: string
   codeShardSize?: number
 }

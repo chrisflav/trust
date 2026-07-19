@@ -9,6 +9,14 @@ import { KindBadge } from './components/KindBadge'
 import { MarksPanel, type MarksEdit } from './components/MarksPanel'
 import { indexMarks, loadMarks, saveMarks, emptyMarks, type MarksIndex } from './data/marks'
 import { pathTo, trustedCutSource } from './data/trustedMode'
+import { WhoTrusts } from './components/WhoTrusts'
+import {
+  SERVER,
+  currentIdentity,
+  trustList,
+  trustedHashes,
+  type Identity,
+} from './data/certificates'
 import { defaultHidden, loadHidden, saveHidden, type HiddenConfig } from './data/hidden'
 
 const INDEX_BASE = '/index'
@@ -71,6 +79,11 @@ export function App() {
   const [hidden, setHidden] = useState<HiddenConfig>(() =>
     typeof window === 'undefined' ? defaultHidden : loadHidden(),
   )
+  /** Who you are on the certificate server, and whose certificates you count. */
+  const [identity, setIdentity] = useState<Identity | null>(null)
+  const [following, setFollowing] = useState<Set<string>>(new Set())
+  /** Hashes vouched for by the people you follow. */
+  const [federated, setFederated] = useState<Set<string>>(new Set())
 
   // Loading an index is tens of megabytes and one worker.  `StrictMode` runs
   // effects twice in development, which downloaded and built the whole thing
@@ -98,6 +111,33 @@ export function App() {
       })
       .catch((e) => setError(String(e)))
   }, [])
+
+  /**
+   * Refresh who you are, whom you follow, and what they vouch for.
+   *
+   * All three fail soft: the certificate server being absent or down leaves the
+   * index perfectly usable, which is the point of it being a static export.
+   */
+  const refreshFederation = useCallback(async () => {
+    if (!SERVER) return
+    const me = await currentIdentity()
+    setIdentity(me)
+    if (!me) {
+      setFollowing(new Set())
+      setFederated(new Set())
+      return
+    }
+    const [list, hashes] = await Promise.all([
+      trustList(),
+      trustedHashes(source?.meta().hasher ?? 'semantic-v1'),
+    ])
+    setFollowing(new Set(list.map((entry) => entry.login)))
+    setFederated(hashes)
+  }, [source])
+
+  useEffect(() => {
+    void refreshFederation()
+  }, [refreshFederation])
 
   // Keep the address bar in step with the view, without adding history entries.
   useEffect(() => {
@@ -175,6 +215,23 @@ export function App() {
   }, [source, repoFilter, hidden.active, hiddenNames])
 
   /**
+   * Trusted here, or vouched for by somebody you follow.
+   *
+   * Federated trust widens exactly this predicate and nothing else — the cut,
+   * the green background and "up to trusted" mode all read from it, so a
+   * certificate from someone you follow behaves like a mark you made yourself.
+   */
+  const isTrusted = useCallback(
+    (id: NodeId) => {
+      if (!source) return false
+      if (marks.trusted.has(source.node(id)?.name)) return true
+      if (federated.size === 0) return false
+      const hash = source.hashOf(id)
+      return hash.length > 0 && federated.has(hash)
+    },
+    [marks, source, federated],
+  )
+  /**
    * The index the views traverse.
    *
    * In "up to trusted" mode this is the index seen through the marks: trusted
@@ -183,8 +240,8 @@ export function App() {
    * only the shape of the dependency relation changes.
    */
   const viewSource = useMemo(
-    () => (source && upToTrusted ? trustedCutSource(source, marks, root) : source),
-    [source, upToTrusted, marks, root],
+    () => (source && upToTrusted ? trustedCutSource(source, marks, root, isTrusted) : source),
+    [source, upToTrusted, marks, root, isTrusted],
   )
 
   /** What the tree walks: the mode applied, then the filters. */
@@ -199,10 +256,6 @@ export function App() {
     return pathTo(treeSource ?? viewSource, root, selected, direction)
   }, [treeSource, viewSource, root, selected, direction])
 
-  const isTrusted = useCallback(
-    (id: NodeId) => (source ? marks.trusted.has(source.node(id)?.name) : false),
-    [marks, source],
-  )
   const isCharacterized = useCallback(
     (id: NodeId) => (source ? marks.characterized.has(source.node(id)?.name) : false),
     [marks, source],
@@ -530,6 +583,15 @@ export function App() {
                 isKnown={isKnown}
                 search={searchDecls}
                 onEdit={marks.editable ? editMarks : undefined}
+              />
+
+              <WhoTrusts
+                decl={rootDecl}
+                meta={meta}
+                hasher={meta.hasher ?? 'semantic-v1'}
+                identity={identity}
+                following={following}
+                onFollowingChange={() => void refreshFederation()}
               />
 
               <section className="direction">

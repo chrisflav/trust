@@ -1209,3 +1209,203 @@ h1 {
   color: var(--muted);
   padding: 12px;
 }
+/* Certificates from other people.  Kept visually distinct from the Judgements
+   panel: those are your own marks, these are assertions you may or may not
+   have decided to count. */
+.who-trusts {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.who-trusts-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.who-trusts h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.who-trusts-hash {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.who-trusts-signin {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--accent);
+}
+
+.who-trusts-empty {
+  margin: 6px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.certificate {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+}
+
+.certificate-issuer {
+  font-weight: 600;
+}
+
+.certificate-assurance {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid currentColor;
+  font-size: 11px;
+}
+
+/* A verified signature and the server's bare word are different claims, and the
+   difference is the whole reason signing exists. */
+.certificate-assurance.signed {
+  color: var(--data);
+}
+
+.certificate-assurance.attested {
+  color: var(--muted);
+}
+
+.certificate-note {
+  color: var(--muted);
+}
+
+.certificate-where {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.certificate-follow {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.certificate-follow:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Declaring trust from the browser.  Signing is offered beside it rather than
+   in place of it: an assertion from a signed-in account is worth something, and
+   demanding a key would mean most declarations never get vouched for at all. */
+.trust-this {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.trust-this button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.trust-this button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.trust-this button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.trust-this-note {
+  flex: 1;
+  min-width: 200px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.trust-this-mine {
+  flex: 1;
+  color: var(--data);
+  font-size: 12px;
+}
+
+.trust-this-toggle {
+  color: var(--muted);
+}
+
+.trust-this-signing {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+/* Said plainly rather than softened: the browser path is genuinely weaker than
+   the command line, and someone choosing it should know why. */
+.trust-this-warning {
+  margin: 0;
+  padding: 8px 10px;
+  border-left: 3px solid var(--axiom);
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.trust-this-key {
+  min-height: 90px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 11px;
+  resize: vertical;
+}
+
+.trust-this-passphrase {
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.trust-this-error {
+  width: 100%;
+  margin: 0;
+  color: var(--axiom);
+  font-size: 12px;
+}

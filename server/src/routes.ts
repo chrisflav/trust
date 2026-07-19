@@ -6,7 +6,9 @@ import {
   exchangeCode,
   githubPublicKeys,
   issueSession,
+  hashToken,
   newState,
+  newToken,
   readSession,
   requireUser,
   upsertIdentity,
@@ -52,6 +54,38 @@ routes.get('/api/me', (request, response) => {
 
 routes.post('/auth/logout', (_request, response) => {
   response.clearCookie('trust_session').json({ ok: true })
+})
+
+// ------------------------------------------------------------------ tokens --
+
+/**
+ * Mint a token for the command line.  Shown once and never again — only its
+ * hash is kept, so the server cannot hand it back even to its owner.
+ */
+routes.post('/api/tokens', requireUser, async (request, response) => {
+  const { name } = request.body as { name?: string }
+  const token = newToken()
+  await pool.query(
+    'INSERT INTO api_token (identity_id, token_sha256, name) VALUES ($1, $2, $3)',
+    [currentUser(request).id, hashToken(token), typeof name === 'string' ? name.slice(0, 100) : ''],
+  )
+  response.json({ token, note: 'copy this now; it is not stored and cannot be shown again' })
+})
+
+routes.get('/api/tokens', requireUser, async (request, response) => {
+  const { rows } = await pool.query(
+    `SELECT id, name, created_at AS "createdAt", last_used_at AS "lastUsedAt"
+       FROM api_token WHERE identity_id = $1 ORDER BY created_at DESC`,
+    [currentUser(request).id],
+  )
+  response.json({ tokens: rows })
+})
+
+routes.delete('/api/tokens/:id', requireUser, async (request, response) => {
+  await pool.query('DELETE FROM api_token WHERE id = $1 AND identity_id = $2', [
+    request.params.id, currentUser(request).id,
+  ])
+  response.json({ ok: true })
 })
 
 // -------------------------------------------------------------- public keys --

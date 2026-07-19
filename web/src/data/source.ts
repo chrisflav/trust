@@ -75,6 +75,10 @@ export interface GraphSource {
   repos(): string[]
   /** Which repository a declaration belongs to. */
   repoOf(id: NodeId): string
+  /** Semantic hash, or '' when the index was exported without them. */
+  hashOf(id: NodeId): string
+  /** Declarations carrying a given semantic hash; a hash can name several. */
+  idsByHash(hash: string): NodeId[]
 }
 
 /**
@@ -165,6 +169,7 @@ export interface DeclColumns {
   kindOf: Uint8Array
   flagOf: Uint8Array
   axioms: [NodeId, string[]][]
+  hashBlob: string
   slots: Int32Array
   mask: number
 }
@@ -293,6 +298,9 @@ const FLAG_IS_PROP = 1
 const FLAG_IS_DATA = 2
 const FLAG_USES_SORRY = 4
 
+/** Semantic hashes are 16 hex characters, which makes the column fixed width. */
+const HASH_WIDTH = 16
+
 /** FNV-1a over a slice of a string, without materialising the slice. */
 function hashRange(text: string, from: number, to: number): number {
   let h = 2166136261
@@ -331,6 +339,13 @@ class DeclTable {
     private readonly flagOf: Uint8Array,
     /** Only the declarations that actually carry axioms; a bulk export has none. */
     private readonly axiomsOf: Map<NodeId, string[]>,
+    /**
+     * Semantic hashes, sixteen characters each, concatenated.
+     *
+     * Fixed width, so a declaration's hash is a slice at a known offset and no
+     * offset table is needed.  Empty when the index was exported without them.
+     */
+    private readonly hashBlob: string,
     /** Open-addressed name index: slot holds `id + 1`, or 0 when empty. */
     private readonly slots: Int32Array,
     private readonly mask: number,
@@ -350,6 +365,7 @@ class DeclTable {
       c.kindOf,
       c.flagOf,
       new Map(c.axioms),
+      c.hashBlob,
       c.slots,
       c.mask,
     )
@@ -369,6 +385,7 @@ class DeclTable {
       kindOf: this.kindOf,
       flagOf: this.flagOf,
       axioms: [...this.axiomsOf],
+      hashBlob: this.hashBlob,
       slots: this.slots,
       mask: this.mask,
     }
@@ -382,6 +399,7 @@ class DeclTable {
     const kinds: number[] = []
     const flags: number[] = []
     const axiomsOf = new Map<NodeId, string[]>()
+    const hashes: string[] = []
 
     // Walked with `indexOf` rather than `split('\n')`: the split materialises a
     // substring per declaration up front, all of which stay alive until the
@@ -408,11 +426,14 @@ class DeclTable {
             (parsed.usesSorry ? FLAG_USES_SORRY : 0),
         )
         if (parsed.axioms && parsed.axioms.length > 0) axiomsOf.set(id, parsed.axioms)
+        hashes.push((parsed.hash ?? '').padEnd(HASH_WIDTH, ' ').slice(0, HASH_WIDTH))
       }
       pos = end + 1
     }
 
     const count = names.length
+    const anyHash = hashes.some((h) => h.trim().length > 0)
+    const hashBlob = anyHash ? hashes.join('') : ''
     const nameAt = new Int32Array(count + 1)
     let offset = 0
     for (let i = 0; i < count; i++) {
@@ -483,6 +504,7 @@ class DeclTable {
       Uint8Array.from(kinds),
       Uint8Array.from(flags),
       axiomsOf,
+      hashBlob,
       slots,
       mask,
     )
@@ -509,6 +531,35 @@ class DeclTable {
     return this.repoList[this.moduleRepo[this.moduleOf[id]]] ?? 'unknown'
   }
 
+  /** The semantic hash of a declaration, or '' when the index carries none. */
+  hashOf(id: NodeId): string {
+    if (this.hashBlob.length === 0 || !this.valid(id)) return ''
+    return this.hashBlob.slice(id * HASH_WIDTH, (id + 1) * HASH_WIDTH).trim()
+  }
+
+  /**
+   * Declarations by semantic hash.
+   *
+   * Built on first use: an index that never meets a certificate never pays for
+   * it.  A hash can name more than one declaration — the same content under two
+   * names hashes identically, which is the whole point — so this maps to a list.
+   */
+  private hashIndex: Map<string, NodeId[]> | null = null
+  idsByHash(hash: string): NodeId[] {
+    if (this.hashBlob.length === 0) return []
+    if (!this.hashIndex) {
+      this.hashIndex = new Map()
+      for (let id = 0; id < this.count; id++) {
+        const key = this.hashOf(id)
+        if (key.length === 0) continue
+        const existing = this.hashIndex.get(key)
+        if (existing) existing.push(id)
+        else this.hashIndex.set(key, [id])
+      }
+    }
+    return this.hashIndex.get(hash) ?? []
+  }
+
   /** A `Decl` object, built on demand — only what is on screen is ever built. */
   decl(id: NodeId): Decl {
     if (!this.valid(id)) return undefined as unknown as Decl
@@ -522,6 +573,8 @@ class DeclTable {
       isData: (flags & FLAG_IS_DATA) !== 0,
     }
     if ((flags & FLAG_USES_SORRY) !== 0) out.usesSorry = true
+    const hash = this.hashOf(id)
+    if (hash.length > 0) out.hash = hash
     const axioms = this.axiomsOf.get(id)
     if (axioms) out.axioms = axioms
     return out
@@ -1009,6 +1062,14 @@ export class StaticIndexSource implements GraphSource {
     return this.table.repoOf(id)
   }
 
+  hashOf(id: NodeId): string {
+    return this.table.hashOf(id)
+  }
+
+  idsByHash(hash: string): NodeId[] {
+    return this.table.idsByHash(hash)
+  }
+
   search(query: string, limit = 50): Decl[] {
     return this.table.search(query, limit)
   }
@@ -1062,6 +1123,8 @@ export function filterSource(base: GraphSource, accept: Accept | null): GraphSou
     code: (id) => base.code(id),
     repos: () => base.repos(),
     repoOf: (id) => base.repoOf(id),
+    hashOf: (id) => base.hashOf(id),
+    idsByHash: (hash) => base.idsByHash(hash),
   }
 }
 
