@@ -173,6 +173,36 @@ docker compose up --build
 
 Postgres is not published to the host, and the server runs unprivileged.
 
+### Deploying
+
+`deploy/trust.merten.dev.conf` puts Apache in front of the compose stack, with
+the frontend at `/` and the server at `/api/` and `/auth/` on **one origin**.
+That is worth insisting on: same-origin means no CORS at all, and a first-party
+session cookie, which browsers increasingly refuse to send cross-site however
+correctly it is labelled.
+
+```bash
+a2enmod proxy proxy_http ssl headers rewrite
+cp deploy/trust.merten.dev.conf /etc/apache2/sites-available/
+a2ensite trust.merten.dev && apachectl configtest && systemctl reload apache2
+certbot --apache -d trust.merten.dev
+```
+
+In `docker/.env`:
+
+```bash
+PUBLIC_URL=https://trust.merten.dev
+APP_URL=https://trust.merten.dev
+COOKIE_SECURE=true
+BIND_ADDR=127.0.0.1        # containers must not be reachable past the proxy
+```
+
+and set the OAuth App's callback to
+`https://trust.merten.dev/auth/github/callback`.
+
+The frontend bakes the server URL in at build time, so after changing
+`PUBLIC_URL` run `docker compose up --build web`.
+
 ### What the server is, and is not
 
 It is a place to publish and find certificates.  It is **not** a trusted party:

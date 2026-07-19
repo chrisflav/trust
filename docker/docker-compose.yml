@@ -37,7 +37,10 @@ services:
       APP_URL: ${APP_URL:-http://localhost:5173}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
     ports:
-      - "${SERVER_PORT:-8099}:8080"
+      # Loopback by default.  Behind a reverse proxy these must not be
+      # reachable from outside, or the TLS, the redirects and the security
+      # headers can all be walked straight past.
+      - "${BIND_ADDR:-127.0.0.1}:${SERVER_PORT:-8099}:8080"
     depends_on:
       db:
         condition: service_healthy
@@ -55,7 +58,7 @@ services:
       # of megabytes, and nothing an image should ever contain.
       - ../web/public/index:/usr/share/nginx/html/index:ro
     ports:
-      - "${WEB_PORT:-5174}:80"
+      - "${BIND_ADDR:-127.0.0.1}:${WEB_PORT:-5174}:80"
     depends_on:
       - server
     restart: unless-stopped
