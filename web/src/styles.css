@@ -1409,3 +1409,93 @@ h1 {
   color: var(--axiom);
   font-size: 12px;
 }
+
+/* -------------------------------------------------------------- follows -- */
+
+.follows {
+  margin: 0 0 16px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.follows-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.follows h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.follows-count,
+.follows-empty,
+.follows-note {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.follows-note {
+  margin: 10px 0 0;
+}
+
+.follows-add {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.follows-input {
+  min-width: 200px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.follows-list {
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.follows-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+.follows-login {
+  font-size: 12px;
+}
+
+.follows-drop {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 0 2px;
+}
+
+.follows-drop:hover:not(:disabled) {
+  color: var(--text);
+}
+
+.follows-error {
+  margin: 8px 0 0;
+  color: var(--axiom);
+  font-size: 12px;
+}

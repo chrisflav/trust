@@ -10,6 +10,7 @@ import { MarksPanel, type MarksEdit } from './components/MarksPanel'
 import { indexMarks, loadMarks, saveMarks, emptyMarks, type MarksIndex } from './data/marks'
 import { pathTo, trustedCutSource } from './data/trustedMode'
 import { WhoTrusts } from './components/WhoTrusts'
+import { FollowPanel } from './components/FollowPanel'
 import {
   SERVER,
   currentIdentity,
@@ -84,6 +85,8 @@ export function App() {
   const [following, setFollowing] = useState<Set<string>>(new Set())
   /** Hashes vouched for by the people you follow. */
   const [federated, setFederated] = useState<Set<string>>(new Set())
+  /** The trust list, shown on demand rather than taking up the header. */
+  const [showFollows, setShowFollows] = useState(false)
 
   // Loading an index is tens of megabytes and one worker.  `StrictMode` runs
   // effects twice in development, which downloaded and built the whole thing
@@ -500,6 +503,15 @@ export function App() {
         >
           up to trusted
         </button>
+        {SERVER && (
+          <button
+            className={`chip mode ${showFollows ? 'on' : ''}`}
+            onClick={() => setShowFollows(!showFollows)}
+            title="Whose certificates count as your own trust marks"
+          >
+            people you trust{following.size > 0 ? ` (${following.size})` : ''}
+          </button>
+        )}
         <div className="repos">
           <span className="label">Repositories</span>
           {source.repos().map((repo) => (
@@ -518,6 +530,15 @@ export function App() {
           )}
         </div>
       </div>
+
+      {SERVER && showFollows && (
+        <FollowPanel
+          identity={identity}
+          following={following}
+          federatedCount={federated.size}
+          onChange={() => void refreshFederation()}
+        />
+      )}
 
       <div className="layout">
         <aside className="results">

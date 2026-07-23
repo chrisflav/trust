@@ -102,8 +102,27 @@ export async function trustList(): Promise<Identity[]> {
   return result?.trusted ?? []
 }
 
-export async function followIdentity(login: string): Promise<boolean> {
-  return (await call(`/api/trust-list/${encodeURIComponent(login)}`, { method: 'POST' })) !== null
+/**
+ * Follow somebody, reporting *why* it failed.
+ *
+ * Following by hand is the one place a person types a name from memory, so
+ * "nobody here by that name" and "the server is not answering" have to be told
+ * apart — they call for completely different reactions, and `call` collapses
+ * both to null.
+ */
+export async function followIdentity(login: string): Promise<{ ok: boolean; error?: string }> {
+  if (!SERVER) return { ok: false, error: 'no certificate server is configured' }
+  try {
+    const response = await fetch(`${SERVER}/api/trust-list/${encodeURIComponent(login)}`, {
+      method: 'POST',
+      credentials: 'include',
+    })
+    if (response.ok) return { ok: true }
+    const body = (await response.json().catch(() => null)) as { error?: string } | null
+    return { ok: false, error: body?.error ?? `the server said ${response.status}` }
+  } catch {
+    return { ok: false, error: 'could not reach the certificate server' }
+  }
 }
 
 export async function unfollowIdentity(login: string): Promise<boolean> {
