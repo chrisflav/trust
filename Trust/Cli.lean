@@ -47,6 +47,10 @@ Usage:
   trust cert sign [options] <file>
   trust cert verify <file>
   trust cert publish [options] <file>
+  trust cert revoke [options] <file>
+  trust cert fetch [options] <hash>
+  trust cert verify-bundle [options] [<file>]
+  trust cert import [options] [<file>]
   trust hash-invariants <module>
 
 Commands:
@@ -102,10 +106,22 @@ Options for cert:
   --key <id>           Which GPG key to sign with, when you have several.
   --server <url>       Certificate server.  Default: $TRUST_SERVER.
   --token <token>      API token.  Default: $TRUST_TOKEN.
+  --hasher <name>      Which hasher a `fetch` is about.
+  --from <url>         Read a bundle from this node instead of from a file.
 
 Signing happens here, by handing the canonical bytes to `gpg` on stdin.  Your
 private key is never read by this program and is never uploaded; the server
 holds public keys only, and verifies rather than being believed.
+
+`revoke` withdraws a certificate everywhere rather than only where it was
+published: the withdrawal is signed by the same key, so any node can check it.
+Only the key that made an assertion can withdraw it, and a later certificate for
+the same content reinstates it.
+
+`verify-bundle` repeats, locally, the check a node claims to have done — each
+signature against the key that travels with it, in a throwaway gpg keyring that
+leaves your own untouched.  `import` does the same and then hands on only what
+checked out.  Together they are why a trust server never has to be believed.
 
 Module patterns:
   *        Match every module.
@@ -253,6 +269,10 @@ structure MarkOptions where
   server : String := ""
   /-- API token for the certificate server. -/
   token : String := ""
+  /-- Which hasher a certificate query is about. -/
+  hasher : String := ""
+  /-- A node to read a bundle from, instead of a file. -/
+  from? : String := ""
 
 /-- Parse the options shared by `trusted`, `protect`, `characterize` and `check`. -/
 def parseMark (args : List String) : Except String (MarkOptions × Array String) :=
@@ -273,6 +293,8 @@ where
       else if arg == "--key" then go rest { opts with key := value } positionals
       else if arg == "--server" then go rest { opts with server := value } positionals
       else if arg == "--token" then go rest { opts with token := value } positionals
+      else if arg == "--hasher" then go rest { opts with hasher := value } positionals
+      else if arg == "--from" then go rest { opts with from? := value } positionals
       else if arg.startsWith "-" then .error s!"unknown option `{arg}`"
       else go (value :: rest) opts (positionals.push arg)
     | arg :: rest =>
@@ -289,6 +311,22 @@ def readCertificate (path : String) : IO Certificate := do
   match Json.parse text >>= fromJson? with
   | .ok cert => return cert
   | .error msg => throw <| IO.userError s!"{path}: {msg}"
+
+/--
+A bundle, from a file or straight from a node.
+
+`--from` fetches a node's public export, which needs no credentials: everything
+in it is signed, and a signature is worth the same to a stranger as to a friend.
+-/
+def readBundle (opts : MarkOptions) (positionals : Array String) : IO (Except String Bundle) := do
+  if !opts.from?.isEmpty then
+    return ← fetchBundle opts.from? ""
+  if positionals.size != 1 then
+    return .error "expected <file>, or --from <node url>"
+  let text ← IO.FS.readFile positionals[0]!
+  match Json.parse text >>= fromJson? with
+  | .ok bundle => return .ok bundle
+  | .error msg => return .error s!"{positionals[0]!}: {msg}"
 
 /--
 The repository a claim is about, when it was not given.
@@ -577,6 +615,114 @@ def run (args : List String) : IO UInt32 := do
         | .ok response =>
           IO.println response
           return 0
+      | "revoke" =>
+        if positionals.size != 1 then
+          IO.eprintln "error: expected <file>"
+          return 1
+        let cert ← readCertificate positionals[0]!
+        let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
+        match ← secretFingerprint opts.key with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok fingerprint =>
+          let revocation : Revocation := {
+            fingerprint
+            hash := cert.claim.hash
+            hasher := cert.claim.hasher
+            reason := opts.note
+            revoked := ← nowRFC3339 }
+          match ← signRevocation revocation opts.key with
+          | .error msg =>
+            IO.eprintln s!"error: {msg}"
+            return 1
+          | .ok signature =>
+            match ← exportPublicKey fingerprint with
+            | .error msg =>
+              IO.eprintln s!"error: {msg}"
+              return 1
+            | .ok key =>
+              let signed : SignedRevocation := { revocation, signature, key, fingerprint }
+              -- Written out whether or not it is published: a withdrawal you
+              -- cannot re-send is one you have to make again from scratch.
+              if !opts.out.isEmpty then
+                IO.FS.writeFile opts.out ((toJson signed).pretty ++ "\n")
+              if server.isEmpty then
+                if opts.out.isEmpty then IO.println (toJson signed).pretty
+                IO.eprintln s!"trust: signed a withdrawal of {cert.claim.decl}; \
+                  no --server, so nothing was published"
+                return 0
+              match ← publishRevocation revocation signature key server with
+              | .error msg =>
+                IO.eprintln s!"error: {msg}"
+                return 1
+              | .ok response =>
+                IO.println response
+                return 0
+      | "fetch" =>
+        if positionals.size != 1 then
+          IO.eprintln "error: expected <hash>"
+          return 1
+        let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
+        if server.isEmpty then
+          IO.eprintln "error: need --server (or TRUST_SERVER)"
+          return 1
+        match ← fetchCertificates server positionals[0]! opts.hasher with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok bundle =>
+          let text := (toJson bundle).pretty ++ "\n"
+          if opts.out.isEmpty then IO.print text else IO.FS.writeFile opts.out text
+          IO.eprintln s!"trust: {bundle.entries.size} certificates for {positionals[0]!}"
+          return 0
+      | "verify-bundle" =>
+        -- The command that makes a server unnecessary rather than trusted: it
+        -- repeats, here, exactly the check the server says it did.
+        match ← readBundle opts positionals with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok bundle =>
+          let verdicts ← verifyBundle bundle
+          for verdict in verdicts do
+            IO.println verdict.describe
+          let bad := verdicts.filter EntryVerdict.isBad
+          if bad.isEmpty then
+            IO.eprintln s!"trust: {verdicts.size} entries, all signatures good"
+            return 0
+          else
+            IO.eprintln s!"trust: {bad.size} of {verdicts.size} entries did not check out"
+            return 1
+      | "import" =>
+        match ← readBundle opts positionals with
+        | .error msg =>
+          IO.eprintln s!"error: {msg}"
+          return 1
+        | .ok bundle =>
+          -- Checked here before it is sent anywhere.  The receiving node checks
+          -- again — it must, since it did not see this happen — but sending on
+          -- entries you have not looked at makes you the vector.
+          let verdicts ← verifyBundle bundle
+          let bad := verdicts.filter EntryVerdict.isBad
+          for verdict in bad do
+            IO.eprintln verdict.describe
+          if !bad.isEmpty then
+            IO.eprintln s!"error: {bad.size} of {verdicts.size} entries did not check out; \
+              refusing to pass them on"
+            return 1
+          let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
+          let token ← if opts.token.isEmpty then envOr "TRUST_TOKEN" "" else pure opts.token
+          if server.isEmpty then
+            IO.eprintln s!"trust: {verdicts.size} entries check out; no --server, nothing imported"
+            return 0
+          match ← postJson s!"{server}/api/import" token (Json.compress (toJson bundle)) with
+          | .error msg =>
+            IO.eprintln s!"error: {msg}"
+            return 1
+          | .ok response =>
+            IO.println response
+            return 0
       | other =>
         IO.eprintln s!"error: unknown cert subcommand `{other}`"
         return 1

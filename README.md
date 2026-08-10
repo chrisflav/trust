@@ -226,6 +226,117 @@ A key also records whether it was found among the account's published GitHub
 keys (`github`) or merely uploaded here (`self`), which is a materially
 different claim about who owns it.
 
+## Federation
+
+There is no central trust database, and this one is not it.  A server is a
+*node*: it holds the certificates published to it, learns others from the nodes
+it talks to, and passes on questions it cannot answer.  The protocol is
+[FEDERATION.md](FEDERATION.md); what follows is how to use it.
+
+The organising rule is that a node relays other people's assertions and is never
+a party to them.  So:
+
+* **Only signed certificates federate.**  `attested` means "a signed-in account
+  said so, and this server vouches for that", which is not something a third
+  party can check or repeat — so it stays where it was made.
+* **Identity across a boundary is a key fingerprint**, not a login.  A node can
+  verify that a key signed something; it cannot verify who owns the key.  Names
+  travel as unverified hints and are shown as such.
+* **Every federated entry is checked before it is stored**, and is handed back
+  with the public key and the exact bytes that were signed, so you can check it
+  again yourself — in the browser, or with `trust cert verify-bundle`.
+
+### Your own database
+
+A local trust database is the same server with a different store and no public
+surface: SQLite instead of Postgres, no OAuth, one identity.
+
+```bash
+cd server && npm install && npm run build && npm run local
+```
+
+It listens on `:8090` and keeps its data in `~/.local/share/trust/trust.db`
+(`SQLITE_PATH` to move it).  Point the CLI at it and publish as normal:
+
+```bash
+export TRUST_SERVER=http://127.0.0.1:8090
+trust cert issue Init.Data.Nat.Gcd Nat.gcd -o gcd.json
+trust cert sign gcd.json
+trust cert publish gcd.json
+```
+
+That it is the same code as a public node is the point.  "Your own database" and
+"a public database" differ in deployment, not in kind.
+
+### Importing from another database
+
+Nothing about pulling somebody's certificates requires their permission or
+yours: a node's export is public, because everything in it is signed.
+
+```bash
+# Look at what a node has, checking every signature here before believing any
+# of it — in a throwaway gpg keyring, so your own is untouched.
+trust cert verify-bundle --from https://trust.merten.dev
+
+# The same check, then hand what survives to your own database.
+trust cert import --from https://trust.merten.dev --server http://127.0.0.1:8090
+```
+
+`verify-bundle` is the command that makes a server unnecessary rather than
+trusted: it repeats, locally, precisely the check the server claims to have
+done.
+
+### Talking to other nodes
+
+A node reads its starting peers from `FEDERATION_SEEDS`.  Everything else is the
+operator's decision, through endpoints that need `ADMIN_TOKEN`:
+
+```bash
+curl -X POST $SERVER/api/peers/pull          -H "Authorization: Bearer $ADMIN_TOKEN" -d '{}'
+curl -X POST $SERVER/api/peers/status/active -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H 'Content-Type: application/json' -d '{"url":"https://other.example.org"}'
+```
+
+Anyone may *announce* a node (`POST /api/peers/announce`), and a node so
+announced is recorded as a `candidate` — never queried until the operator
+promotes it, unless `FEDERATION_AUTODISCOVER` is on.  The announced URL is
+checked against what that node says its own address is, which is what stops this
+endpoint being used to make your server probe addresses on your network.
+
+To watch two nodes federate:
+
+```bash
+cd docker && docker compose --profile federation up --build
+```
+
+### Asking a question that travels
+
+```
+GET /api/certificates?hash=<h>&hasher=<name>&depth=2
+```
+
+The node answers from its own store and its cache, and — if `depth` allows —
+asks its peers the same question, one hop shallower.  Fan-out runs under a
+wall-clock budget rather than a peer count, and an answer that may be short says
+so: *nobody vouches for this* and *I could not find out* are different sentences.
+
+Certificates come back labelled with where they came from, and the frontend
+offers a **check it yourself** button next to each one, which verifies the
+signature in the page against the key that travelled with it.
+
+### Withdrawing a certificate
+
+Deleting a row hides it on one server.  Once certificates travel, a withdrawal
+has to be as checkable as the assertion was, so it is signed by the same key:
+
+```bash
+trust cert revoke gcd.json --note "the proof was wrong" --server $TRUST_SERVER
+```
+
+Only the key that made an assertion can withdraw it, and a *later* certificate
+for the same content reinstates it — so re-issuing after a withdrawal is
+ordinary and needs no second message.
+
 ### Index layout
 
 ```
@@ -252,11 +363,18 @@ lake env /path/to/trust/.lake/build/bin/trust export \
 ## Tests
 
 ```bash
-cd web && npm test
+cd web    && npm test
+cd server && npm test && npm run typecheck
 ```
 
 The frontend suite includes a check against a real exported index, which is
 skipped when none has been generated.
+
+The server suite starts three real nodes on loopback and federates between them:
+a certificate published to one is found through another, a tampered one is
+refused, a question travels two hops, a relay loop is refused, and a signed
+withdrawal propagates.  It runs on SQLite, which is also what local mode uses,
+so the store both backends share is exercised by every test in it.
 
 ## License
 

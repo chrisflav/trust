@@ -1,13 +1,28 @@
 import { useState } from 'react'
-import { followIdentity, signInUrl, unfollowIdentity, type Identity } from '../data/certificates'
+import {
+  followIdentity,
+  followKey,
+  signInUrl,
+  unfollowIdentity,
+  unfollowKey,
+  type FollowedKey,
+  type Identity,
+} from '../data/certificates'
 
 interface FollowPanelProps {
   identity: Identity | null
   /** GitHub logins whose certificates already count as your own. */
   following: Set<string>
+  /** Keys whose certificates count, wherever they were published. */
+  followingKeys: FollowedKey[]
   /** How many declarations that adds up to, across everyone followed. */
   federatedCount: number
   onChange: () => void
+}
+
+/** A fingerprint, rather than a name: hex, and far too long to be a login. */
+function looksLikeFingerprint(value: string): boolean {
+  return /^[0-9a-fA-F]{16,64}$/.test(value.replace(/\s/g, ''))
 }
 
 /**
@@ -23,7 +38,13 @@ interface FollowPanelProps {
  * panel says so, because an intuition that trust flows onwards is easy to form
  * and would be wrong.
  */
-export function FollowPanel({ identity, following, federatedCount, onChange }: FollowPanelProps) {
+export function FollowPanel({
+  identity,
+  following,
+  followingKeys,
+  federatedCount,
+  onChange,
+}: FollowPanelProps) {
   const [login, setLogin] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -47,7 +68,12 @@ export function FollowPanel({ identity, following, federatedCount, onChange }: F
     if (!wanted) return
     setBusy(true)
     setError(null)
-    const result = await followIdentity(wanted)
+    // A fingerprint and a login are told apart by shape rather than by a mode
+    // switch: they are the same intention, and which one you have to hand
+    // depends only on whether you met the person or their signature.
+    const result = looksLikeFingerprint(wanted)
+      ? await followKey(wanted.replace(/\s/g, '').toLowerCase(), '')
+      : await followIdentity(wanted)
     setBusy(false)
     if (!result.ok) {
       setError(result.error ?? 'could not follow them')
@@ -61,6 +87,14 @@ export function FollowPanel({ identity, following, federatedCount, onChange }: F
     setBusy(true)
     setError(null)
     await unfollowIdentity(who)
+    setBusy(false)
+    onChange()
+  }
+
+  const dropKey = async (fingerprint: string) => {
+    setBusy(true)
+    setError(null)
+    await unfollowKey(fingerprint)
     setBusy(false)
     onChange()
   }
@@ -84,7 +118,7 @@ export function FollowPanel({ identity, following, federatedCount, onChange }: F
         <input
           className="follows-input"
           value={login}
-          placeholder="GitHub login"
+          placeholder="GitHub login, or a key fingerprint"
           spellCheck={false}
           autoComplete="off"
           disabled={busy}
@@ -113,9 +147,33 @@ export function FollowPanel({ identity, following, federatedCount, onChange }: F
         </ul>
       )}
 
+      {followingKeys.length > 0 && (
+        <ul className="follows-list follows-keys">
+          {followingKeys.map((key) => (
+            <li key={key.fingerprint}>
+              <span className="follows-login" title={key.fingerprint}>
+                {key.label || `key ${key.fingerprint.slice(-16)}`}
+              </span>
+              <button
+                className="follows-drop"
+                disabled={busy}
+                onClick={() => void dropKey(key.fingerprint)}
+              >
+                unfollow
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <p className="follows-note">
         Their certificates behave as if you had marked the declarations trusted yourself. This is
         one hop only: it does not extend to whoever they trust in turn.
+      </p>
+      <p className="follows-note">
+        Following a <em>key</em> rather than a name is what keeps working when a certificate reaches
+        this server from another one: a login means something only where it was issued, and a
+        signature means the same thing everywhere.
       </p>
     </section>
   )
