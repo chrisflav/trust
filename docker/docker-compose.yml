@@ -36,6 +36,14 @@ services:
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8099}
       APP_URL: ${APP_URL:-http://localhost:5173}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      NODE_NAME: ${NODE_NAME:-}
+      # Nodes this one talks to, and the token for the endpoints that change
+      # that.  Both empty by default: a server that federates with strangers, or
+      # lets them tell it to, should be something an operator asked for.
+      FEDERATION_SEEDS: ${FEDERATION_SEEDS:-}
+      FEDERATION_AUTODISCOVER: ${FEDERATION_AUTODISCOVER:-false}
+      FEDERATION_ALLOW_PRIVATE: ${FEDERATION_ALLOW_PRIVATE:-false}
+      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
     ports:
       # Loopback by default.  Behind a reverse proxy these must not be
       # reachable from outside, or the TLS, the redirects and the security
@@ -63,5 +71,39 @@ services:
       - server
     restart: unless-stopped
 
+  # A second node, to watch federation actually happen.
+  #
+  #   docker compose --profile federation up --build
+  #
+  # It keeps its certificates in a SQLite file rather than a second Postgres,
+  # which is the same configuration a person running a database of their own
+  # would use — so this exercises local mode as well as federation.
+  #
+  # `FEDERATION_ALLOW_PRIVATE` is on because the two nodes reach each other by
+  # container name on a private network, which the address rules otherwise
+  # forbid for good reason.  It belongs in a demo and nowhere else.
+  peer:
+    profiles: ["federation"]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      TRUST_LOCAL: "true"
+      STORE: sqlite
+      SQLITE_PATH: /data/trust.db
+      PORT: 8090
+      NODE_NAME: peer
+      PUBLIC_URL: http://peer:8090
+      FEDERATION_SEEDS: http://server:8080
+      FEDERATION_ALLOW_PRIVATE: "true"
+    volumes:
+      - peerdata:/data
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${PEER_PORT:-8098}:8090"
+    depends_on:
+      - server
+    restart: unless-stopped
+
 volumes:
   pgdata:
+  peerdata:

@@ -63,6 +63,24 @@ classification theorems)
   (Make this available on demand and in the visualisation. Also provide an
   environment linter that flags protected declarations with changed semantic hash.)
 
+## Federated public trust databases
+
+Certificates should not live on one server.  Every user has a local trust
+database that can import entries from others; a public one is the same thing
+with an API in front of it, so that entries can be published and retrieved.
+Public databases discover each other, and a query for a semantic hash, a signer
+or a public key is delegated onwards to the ones they know.
+
+An entry from another database is only worth what its signature is worth, so it
+is returned only when the signature checks out against the public key it names.
+That, rather than any relationship between servers, is what makes the network
+safe to extend to strangers.
+
+Trust servers stay independent of the frontend: the frontend connects to a
+public one, or — run locally — to your own.
+
+See [FEDERATION.md](FEDERATION.md) for the protocol.
+
 ## Implementation
 
 Use the tool https://github.com/mathlib-initiative/aftk for dependency analysis

@@ -1,48 +1,41 @@
 import express from 'express'
-import { migrate, waitForDatabase } from './db'
-import { routes } from './routes'
+import { checkConfiguration, loadConfig, type Config } from './config'
+import { createAuth } from './auth'
+import { createRoutes } from './routes'
+import { openDb, waitForDatabase } from './store/db'
+import { Store } from './store'
+import { announcePeer } from './federation/service'
 
-const PORT = Number(process.env.PORT ?? 8080)
+/**
+ * Paths any node may read, from anywhere, without a session.
+ *
+ * Everything they return is either public by construction or signed, so the
+ * useful CORS answer is `*` — and `*` is only usable *because* they need no
+ * credentials.  The rest of the API keeps the single named origin it has
+ * always had, since `*` and cookies are mutually exclusive for good reason.
+ */
+const PUBLIC_PREFIXES = ['/api/federation', '/api/peers', '/api/certificates', '/api/key']
 
-/** Refuse to start misconfigured rather than fail confusingly on first use. */
-function checkConfiguration(): string[] {
-  const problems: string[] = []
-  if (!process.env.DATABASE_URL) problems.push('DATABASE_URL is not set')
-  const secret = process.env.SESSION_SECRET ?? ''
-  if (secret.length < 32) {
-    problems.push('SESSION_SECRET must be at least 32 characters (openssl rand -hex 32)')
-  }
-  for (const name of ['GITHUB_CLIENT_ID', 'GITHUB_CLIENT_SECRET', 'PUBLIC_URL']) {
-    if (!process.env[name]) problems.push(`${name} is not set`)
-  }
-  return problems
+function isPublicRead(request: express.Request): boolean {
+  return (
+    request.method === 'GET' &&
+    PUBLIC_PREFIXES.some((prefix) => request.path === prefix || request.path.startsWith(`${prefix}/`))
+  )
 }
 
-async function main(): Promise<void> {
-  const problems = checkConfiguration()
-  if (problems.length > 0) {
-    for (const problem of problems) console.error(`config: ${problem}`)
-    console.error('see docker/.env.example')
-    process.exit(1)
-  }
-
-  await waitForDatabase()
-  await migrate()
-
+export function createApp(config: Config, store: Store): express.Express {
   const app = express()
-  app.use(express.json({ limit: '256kb' }))
+  app.use(express.json({ limit: '1mb' }))
 
-  // The frontend is served from somewhere else, so it needs to be allowed to
-  // call this with credentials; a single named origin rather than `*`, since
-  // `*` and cookies are mutually exclusive for good reason.
-  const origin = process.env.APP_URL
   app.use((request, response, next) => {
-    if (origin) {
-      response.setHeader('Access-Control-Allow-Origin', origin)
+    if (isPublicRead(request)) {
+      response.setHeader('Access-Control-Allow-Origin', '*')
+    } else if (config.appUrl) {
+      response.setHeader('Access-Control-Allow-Origin', config.appUrl)
       response.setHeader('Access-Control-Allow-Credentials', 'true')
-      response.setHeader('Access-Control-Allow-Headers', 'Content-Type')
-      response.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
     }
+    response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
+    response.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS')
     if (request.method === 'OPTIONS') {
       response.status(204).end()
       return
@@ -50,16 +43,62 @@ async function main(): Promise<void> {
     next()
   })
 
-  app.use(routes)
+  app.use(createRoutes(config, store, createAuth(config, store)))
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error(error)
     res.status(500).json({ error: 'internal error' })
   })
-
-  app.listen(PORT, () => console.log(`trust server listening on :${PORT}`))
+  return app
 }
 
-main().catch((error) => {
-  console.error(error)
-  process.exit(1)
-})
+export async function openStore(config: Config): Promise<Store> {
+  const db = await openDb({
+    kind: config.store,
+    connectionString: config.databaseUrl,
+    path: config.sqlitePath,
+  })
+  if (config.store === 'pg') await waitForDatabase(db)
+  const store = new Store(db)
+  await store.ready()
+  return store
+}
+
+/** Record the peers the operator configured, without ever querying them yet. */
+async function adoptSeeds(config: Config, store: Store): Promise<void> {
+  for (const seed of config.seeds) {
+    const existing = await store.peerByUrl(seed)
+    if (existing) continue
+    // A seed is the operator's own decision, so it is queried from the start —
+    // unlike anything discovered, which only ever becomes a candidate.
+    await store.upsertPeer(seed, '', 'seed')
+    // Best effort: a seed that is down at boot is still a seed.
+    void announcePeer(store, config, seed).catch(() => undefined)
+  }
+}
+
+async function main(): Promise<void> {
+  const config = loadConfig()
+  const problems = checkConfiguration(config)
+  if (problems.length > 0) {
+    for (const problem of problems) console.error(`config: ${problem}`)
+    console.error('see docker/.env.example')
+    process.exit(1)
+  }
+
+  const store = await openStore(config)
+  await adoptSeeds(config, store)
+
+  createApp(config, store).listen(config.port, () => {
+    const where = config.store === 'sqlite' ? config.sqlitePath : 'postgres'
+    console.log(
+      `trust server listening on :${config.port} (${config.local ? 'local' : 'public'}, ${where})`,
+    )
+  })
+}
+
+if (require.main === module) {
+  main().catch((error) => {
+    console.error(error)
+    process.exit(1)
+  })
+}

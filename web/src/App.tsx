@@ -11,11 +11,13 @@ import { indexMarks, loadMarks, saveMarks, emptyMarks, type MarksIndex } from '.
 import { pathTo, trustedCutSource } from './data/trustedMode'
 import { WhoTrusts } from './components/WhoTrusts'
 import { FollowPanel } from './components/FollowPanel'
+import { ServerPicker } from './components/ServerPicker'
 import {
-  SERVER,
   currentIdentity,
+  hasServer,
   trustList,
   trustedHashes,
+  type FollowedKey,
   type Identity,
 } from './data/certificates'
 import { defaultHidden, loadHidden, saveHidden, type HiddenConfig } from './data/hidden'
@@ -83,6 +85,8 @@ export function App() {
   /** Who you are on the certificate server, and whose certificates you count. */
   const [identity, setIdentity] = useState<Identity | null>(null)
   const [following, setFollowing] = useState<Set<string>>(new Set())
+  /** Keys you follow — the half of a trust list that survives federation. */
+  const [followingKeys, setFollowingKeys] = useState<FollowedKey[]>([])
   /** Hashes vouched for by the people you follow. */
   const [federated, setFederated] = useState<Set<string>>(new Set())
   /** The trust list, shown on demand rather than taking up the header. */
@@ -122,11 +126,12 @@ export function App() {
    * index perfectly usable, which is the point of it being a static export.
    */
   const refreshFederation = useCallback(async () => {
-    if (!SERVER) return
+    if (!hasServer()) return
     const me = await currentIdentity()
     setIdentity(me)
     if (!me) {
       setFollowing(new Set())
+      setFollowingKeys([])
       setFederated(new Set())
       return
     }
@@ -134,7 +139,8 @@ export function App() {
       trustList(),
       trustedHashes(source?.meta().hasher ?? 'semantic-v1'),
     ])
-    setFollowing(new Set(list.map((entry) => entry.login)))
+    setFollowing(new Set(list.people.map((entry) => entry.login)))
+    setFollowingKeys(list.keys)
     setFederated(hashes)
   }, [source])
 
@@ -503,15 +509,19 @@ export function App() {
         >
           up to trusted
         </button>
-        {SERVER && (
+        {hasServer() && (
           <button
             className={`chip mode ${showFollows ? 'on' : ''}`}
             onClick={() => setShowFollows(!showFollows)}
             title="Whose certificates count as your own trust marks"
           >
-            people you trust{following.size > 0 ? ` (${following.size})` : ''}
+            people you trust
+            {following.size + followingKeys.length > 0
+              ? ` (${following.size + followingKeys.length})`
+              : ''}
           </button>
         )}
+        {hasServer() && <ServerPicker />}
         <div className="repos">
           <span className="label">Repositories</span>
           {source.repos().map((repo) => (
@@ -531,10 +541,11 @@ export function App() {
         </div>
       </div>
 
-      {SERVER && showFollows && (
+      {hasServer() && showFollows && (
         <FollowPanel
           identity={identity}
           following={following}
+          followingKeys={followingKeys}
           federatedCount={federated.size}
           onChange={() => void refreshFederation()}
         />
@@ -612,6 +623,7 @@ export function App() {
                 hasher={meta.hasher ?? 'semantic-v1'}
                 identity={identity}
                 following={following}
+                followingKeys={new Set(followingKeys.map((key) => key.fingerprint))}
                 onFollowingChange={() => void refreshFederation()}
               />
 

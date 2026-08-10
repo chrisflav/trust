@@ -1,295 +1,537 @@
-import { Router } from 'express'
-import { pool } from './db'
+import { Router, type Request, type RequestHandler, type Response } from 'express'
+import type { Config } from './config'
+import type { Auth } from './auth'
+import type { Store } from './store'
 import {
-  consumeState,
-  currentUser,
-  exchangeCode,
-  githubPublicKeys,
-  issueSession,
-  hashToken,
-  newState,
-  newToken,
-  readSession,
-  requireUser,
-  upsertIdentity,
-} from './auth'
-import { canonicalClaim, parseClaim, verifySignature, type Claim } from './certificate'
-
-export const routes = Router()
-
-routes.get('/api/health', async (_request, response) => {
-  await pool.query('SELECT 1')
-  response.json({ ok: true })
-})
-
-// ---------------------------------------------------------------- identity --
-
-routes.get('/auth/github', (_request, response) => {
-  const redirect = new URL('https://github.com/login/oauth/authorize')
-  redirect.searchParams.set('client_id', process.env.GITHUB_CLIENT_ID ?? '')
-  redirect.searchParams.set('redirect_uri', `${process.env.PUBLIC_URL}/auth/github/callback`)
-  redirect.searchParams.set('scope', 'read:user')
-  redirect.searchParams.set('state', newState())
-  response.redirect(redirect.toString())
-})
-
-routes.get('/auth/github/callback', async (request, response) => {
-  const { code, state } = request.query as { code?: string; state?: string }
-  if (!code || !state || !consumeState(state)) {
-    response.status(400).json({ error: 'bad OAuth state' })
-    return
-  }
-  try {
-    const user = await upsertIdentity(await exchangeCode(code))
-    issueSession(response, user)
-    response.redirect(process.env.APP_URL ?? '/')
-  } catch (error) {
-    response.status(502).json({ error: String(error instanceof Error ? error.message : error) })
-  }
-})
-
-routes.get('/api/me', (request, response) => {
-  response.json({ user: readSession(request) })
-})
-
-routes.post('/auth/logout', (_request, response) => {
-  response.clearCookie('trust_session').json({ ok: true })
-})
-
-// ------------------------------------------------------------------ tokens --
+  canonicalClaim,
+  canonicalRevocation,
+  parseClaim,
+  parseRevocation,
+  readPublicKey,
+  verifyDetached,
+  verifySignature,
+} from './certificate'
+import { isSuppressed, parseBundle, parseCursor, parseVia, PROTOCOL } from './federation/protocol'
+import {
+  announcePeer,
+  answer,
+  descriptorFor,
+  discoverThrough,
+  importBundle,
+  pullFrom,
+  pullFromAll,
+  toEntry,
+} from './federation/service'
 
 /**
- * Mint a token for the command line.  Shown once and never again — only its
- * hash is kept, so the server cannot hand it back even to its owner.
- */
-routes.post('/api/tokens', requireUser, async (request, response) => {
-  const { name } = request.body as { name?: string }
-  const token = newToken()
-  await pool.query(
-    'INSERT INTO api_token (identity_id, token_sha256, name) VALUES ($1, $2, $3)',
-    [currentUser(request).id, hashToken(token), typeof name === 'string' ? name.slice(0, 100) : ''],
-  )
-  response.json({ token, note: 'copy this now; it is not stored and cannot be shown again' })
-})
-
-routes.get('/api/tokens', requireUser, async (request, response) => {
-  const { rows } = await pool.query(
-    `SELECT id, name, created_at AS "createdAt", last_used_at AS "lastUsedAt"
-       FROM api_token WHERE identity_id = $1 ORDER BY created_at DESC`,
-    [currentUser(request).id],
-  )
-  response.json({ tokens: rows })
-})
-
-routes.delete('/api/tokens/:id', requireUser, async (request, response) => {
-  await pool.query('DELETE FROM api_token WHERE id = $1 AND identity_id = $2', [
-    request.params.id, currentUser(request).id,
-  ])
-  response.json({ ok: true })
-})
-
-// -------------------------------------------------------------- public keys --
-
-/**
- * Register a public key.
+ * One path parameter, as a string.
  *
- * Public half only, and the route rejects anything that looks like a private
- * key rather than storing it: a server that never holds signing material
- * cannot leak it, and signing belongs on the machine that holds the key.
+ * Express types a parameter as `string | string[]`, because a route *can*
+ * declare a repeating one.  None of these do, and `String(…)` at every use site
+ * would be noise that says nothing.
  */
-routes.post('/api/keys', requireUser, async (request, response) => {
-  const { armored } = request.body as { armored?: string }
-  if (typeof armored !== 'string' || !armored.includes('BEGIN PGP PUBLIC KEY BLOCK')) {
-    response.status(400).json({ error: 'expected an armored PGP *public* key' })
-    return
-  }
-  if (armored.includes('PRIVATE KEY BLOCK')) {
-    response.status(400).json({ error: 'that is a private key — never send one here' })
-    return
-  }
-  const user = currentUser(request)
-  const openpgp = await import('openpgp')
-  let fingerprint: string
-  try {
-    fingerprint = (await openpgp.readKey({ armoredKey: armored })).getFingerprint()
-  } catch (error) {
-    response.status(400).json({ error: `unreadable key: ${String(error)}` })
-    return
-  }
-  const published = await githubPublicKeys(user.login)
-  const onGitHub = published.some((key) => key.replace(/\s/g, '') === armored.replace(/\s/g, ''))
-  await pool.query(
-    `INSERT INTO gpg_key (identity_id, fingerprint, armored, verified_via)
-     VALUES ($1, $2, $3, $4)
-     ON CONFLICT (identity_id, fingerprint) DO UPDATE
-       SET armored = EXCLUDED.armored, verified_via = EXCLUDED.verified_via`,
-    [user.id, fingerprint, armored, onGitHub ? 'github' : 'self'],
-  )
-  response.json({ fingerprint, verifiedVia: onGitHub ? 'github' : 'self' })
-})
-
-routes.get('/api/keys/:login', async (request, response) => {
-  const { rows } = await pool.query(
-    `SELECT k.fingerprint, k.armored, k.verified_via AS "verifiedVia"
-       FROM gpg_key k JOIN identity i ON i.id = k.identity_id
-      WHERE i.login = $1`,
-    [request.params.login],
-  )
-  response.json({ keys: rows })
-})
-
-// ------------------------------------------------------------- certificates --
-
-async function keysFor(identityId: number): Promise<string[]> {
-  const { rows } = await pool.query<{ armored: string }>(
-    'SELECT armored FROM gpg_key WHERE identity_id = $1',
-    [identityId],
-  )
-  return rows.map((row) => row.armored)
+function param(request: Request, name: string): string {
+  const value = (request.params as Record<string, string | string[]>)[name]
+  return Array.isArray(value) ? (value[0] ?? '') : (value ?? '')
 }
 
-/**
- * Publish a certificate.
- *
- * A signature is optional but is the whole point: unsigned, the row is only
- * this server's word that a logged-in account said something, and is marked
- * `attested` so a reader can tell the difference.
- */
-routes.post('/api/certificates', requireUser, async (request, response) => {
-  const body = request.body as { claim?: unknown; signature?: string }
-  const claim = parseClaim(body.claim)
-  if ('error' in claim) {
-    response.status(400).json({ error: claim.error })
-    return
-  }
-  const user = currentUser(request)
-  let assurance = 'attested'
-  let fingerprint: string | null = null
-  if (typeof body.signature === 'string' && body.signature.length > 0) {
-    const verdict = await verifySignature(claim, body.signature, await keysFor(user.id))
-    if (!verdict.ok) {
-      response.status(400).json({ error: `signature did not verify: ${verdict.reason}` })
+export function createRoutes(config: Config, store: Store, auth: Auth): Router {
+  const routes = Router()
+  const { requireUser, currentUser } = auth
+
+  /**
+   * The operator's endpoints, closed unless a token is configured.
+   *
+   * Local mode has no separation to enforce: the only person who can reach the
+   * server is the person whose database it is.
+   */
+  const requireOperator: RequestHandler = (request, response, next) => {
+    if (config.local) return next()
+    const header = request.headers.authorization ?? ''
+    const offered = header.startsWith('Bearer ') ? header.slice(7).trim() : ''
+    if (config.adminToken.length === 0 || offered !== config.adminToken) {
+      response.status(403).json({ error: 'this endpoint is the operator’s' })
       return
     }
-    assurance = 'signed'
-    fingerprint = verdict.fingerprint ?? null
+    next()
   }
-  await pool.query(
-    `INSERT INTO certificate
-       (issuer_id, decl, decl_hash, hasher, repo, commit_sha, toolchain,
-        asserted_at, note, signature, fingerprint, assurance)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-     ON CONFLICT (issuer_id, decl_hash, hasher) DO UPDATE SET
-       decl = EXCLUDED.decl, repo = EXCLUDED.repo, commit_sha = EXCLUDED.commit_sha,
-       toolchain = EXCLUDED.toolchain, asserted_at = EXCLUDED.asserted_at,
-       note = EXCLUDED.note, signature = EXCLUDED.signature,
-       fingerprint = EXCLUDED.fingerprint, assurance = EXCLUDED.assurance,
-       revoked_at = NULL`,
-    [
-      user.id, claim.decl, claim.hash, claim.hasher, claim.repo, claim.commit,
-      claim.toolchain, claim.asserted, claim.note, body.signature ?? null, fingerprint, assurance,
-    ],
-  )
-  response.json({ ok: true, assurance })
-})
 
-routes.delete('/api/certificates/:hash', requireUser, async (request, response) => {
-  await pool.query(
-    'UPDATE certificate SET revoked_at = now() WHERE issuer_id = $1 AND decl_hash = $2',
-    [currentUser(request).id, request.params.hash],
-  )
-  response.json({ ok: true })
-})
-
-/**
- * Who vouches for this declaration.
- *
- * Returns the canonical claim bytes and the signature alongside the verdict, so
- * a client can repeat the check rather than take this server's word for it.
- */
-routes.get('/api/certificates', async (request, response) => {
-  const { hash, hasher } = request.query as { hash?: string; hasher?: string }
-  if (!hash) {
-    response.status(400).json({ error: 'hash is required' })
-    return
-  }
-  const { rows } = await pool.query(
-    `SELECT i.login AS issuer, i.avatar_url AS "avatarUrl", c.decl, c.decl_hash AS hash,
-            c.hasher, c.repo, c.commit_sha AS commit, c.toolchain,
-            c.asserted_at AS asserted, c.note, c.signature, c.fingerprint, c.assurance,
-            k.verified_via AS "keyVerifiedVia"
-       FROM certificate c
-       JOIN identity i ON i.id = c.issuer_id
-       LEFT JOIN gpg_key k ON k.identity_id = c.issuer_id AND k.fingerprint = c.fingerprint
-      WHERE c.decl_hash = $1 AND ($2::text IS NULL OR c.hasher = $2) AND c.revoked_at IS NULL
-      ORDER BY c.assurance = 'signed' DESC, c.asserted_at DESC`,
-    [hash, hasher ?? null],
-  )
-  response.json({
-    certificates: rows.map((row) => {
-      const claim: Claim = {
-        decl: row.decl, hash: row.hash, hasher: row.hasher, repo: row.repo,
-        commit: row.commit, toolchain: row.toolchain,
-        asserted: new Date(row.asserted).toISOString(), note: row.note,
-      }
-      return { ...row, claim, canonical: canonicalClaim(claim) }
-    }),
+  routes.get('/api/health', async (_request, response) => {
+    await store.health()
+    response.json({ ok: true })
   })
-})
 
-// -------------------------------------------------------------- trust lists --
+  // ---------------------------------------------------------------- identity --
 
-routes.get('/api/trust-list', requireUser, async (request, response) => {
-  const { rows } = await pool.query(
-    `SELECT i.login, i.avatar_url AS "avatarUrl"
-       FROM trust_list t JOIN identity i ON i.id = t.trusted_id
-      WHERE t.truster_id = $1 ORDER BY i.login`,
-    [currentUser(request).id],
-  )
-  response.json({ trusted: rows })
-})
+  routes.get('/auth/github', (_request, response) => {
+    response.redirect(auth.authorizeUrl())
+  })
 
-routes.post('/api/trust-list/:login', requireUser, async (request, response) => {
-  const { rows } = await pool.query<{ id: string }>('SELECT id FROM identity WHERE login = $1', [
-    request.params.login,
-  ])
-  if (rows.length === 0) {
-    response.status(404).json({ error: 'nobody here by that name has published anything' })
-    return
-  }
-  await pool.query(
-    `INSERT INTO trust_list (truster_id, trusted_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
-    [currentUser(request).id, Number(rows[0].id)],
-  )
-  response.json({ ok: true })
-})
+  routes.get('/auth/github/callback', async (request, response) => {
+    const { code, state } = request.query as { code?: string; state?: string }
+    if (!code || !state || !auth.consumeState(state)) {
+      response.status(400).json({ error: 'bad OAuth state' })
+      return
+    }
+    try {
+      const github = await auth.exchangeCode(code)
+      const user = await store.upsertIdentity({
+        githubId: github.id,
+        login: github.login,
+        avatarUrl: github.avatar_url ?? '',
+      })
+      auth.issueSession(response, user)
+      response.redirect(config.appUrl || '/')
+    } catch (error) {
+      response.status(502).json({ error: String(error instanceof Error ? error.message : error) })
+    }
+  })
 
-routes.delete('/api/trust-list/:login', requireUser, async (request, response) => {
-  await pool.query(
-    `DELETE FROM trust_list USING identity
-      WHERE trust_list.trusted_id = identity.id
-        AND trust_list.truster_id = $1 AND identity.login = $2`,
-    [currentUser(request).id, request.params.login],
-  )
-  response.json({ ok: true })
-})
+  routes.get('/api/me', async (request, response) => {
+    const session = auth.readSession(request)
+    if (session) {
+      response.json({ user: session })
+      return
+    }
+    // A local database has nobody to sign in as, and saying "signed out" would
+    // send the frontend looking for an OAuth flow that does not exist here.
+    if (config.local) {
+      response.json({ user: await store.ensureLocalIdentity(config.name || 'local'), local: true })
+      return
+    }
+    response.json({ user: null })
+  })
 
-/**
- * Every hash your trust list vouches for.
- *
- * What the frontend actually needs: one flat set it can turn into trusted
- * declarations.  Non-transitive by construction — the join goes one hop, so
- * trusting someone never silently enrols the people they trust.
- */
-routes.get('/api/trusted', requireUser, async (request, response) => {
-  const { hasher } = request.query as { hasher?: string }
-  const { rows } = await pool.query(
-    `SELECT DISTINCT c.decl_hash AS hash, c.hasher
-       FROM certificate c
-       JOIN trust_list t ON t.trusted_id = c.issuer_id
-      WHERE t.truster_id = $1 AND c.revoked_at IS NULL
-        AND ($2::text IS NULL OR c.hasher = $2)`,
-    [currentUser(request).id, hasher ?? null],
-  )
-  response.json({ hashes: rows })
-})
+  routes.post('/auth/logout', (_request, response) => {
+    response.clearCookie('trust_session').json({ ok: true })
+  })
+
+  // ------------------------------------------------------------------ tokens --
+
+  /**
+   * Mint a token for the command line.  Shown once and never again — only its
+   * hash is kept, so the server cannot hand it back even to its owner.
+   */
+  routes.post('/api/tokens', requireUser, async (request, response) => {
+    const { name } = request.body as { name?: string }
+    const token = auth.newToken()
+    await store.createToken(
+      currentUser(request).id,
+      auth.hashToken(token),
+      typeof name === 'string' ? name.slice(0, 100) : '',
+    )
+    response.json({ token, note: 'copy this now; it is not stored and cannot be shown again' })
+  })
+
+  routes.get('/api/tokens', requireUser, async (request, response) => {
+    response.json({ tokens: await store.listTokens(currentUser(request).id) })
+  })
+
+  routes.delete('/api/tokens/:id', requireUser, async (request, response) => {
+    await store.deleteToken(currentUser(request).id, param(request, 'id'))
+    response.json({ ok: true })
+  })
+
+  // -------------------------------------------------------------- public keys --
+
+  /**
+   * Register a public key.
+   *
+   * Public half only, and the route rejects anything that looks like a private
+   * key rather than storing it: a server that never holds signing material
+   * cannot leak it, and signing belongs on the machine that holds the key.
+   */
+  routes.post('/api/keys', requireUser, async (request, response) => {
+    const { armored } = request.body as { armored?: string }
+    const key = await readPublicKey(armored as string)
+    if ('error' in key) {
+      response.status(400).json({ error: key.error })
+      return
+    }
+    const user = currentUser(request)
+    const published = config.local ? [] : await auth.githubPublicKeys(user.login)
+    const onGitHub = published.some(
+      (candidate) => candidate.replace(/\s/g, '') === (armored as string).replace(/\s/g, ''),
+    )
+    const verifiedVia = onGitHub ? 'github' : 'self'
+    await store.upsertKey(user.id, key.fingerprint, armored as string, verifiedVia)
+    response.json({ fingerprint: key.fingerprint, verifiedVia })
+  })
+
+  routes.get('/api/keys/:login', async (request, response) => {
+    response.json({ keys: await store.keysForLogin(param(request, 'login')) })
+  })
+
+  /**
+   * A key by fingerprint, wherever this node saw it.
+   *
+   * Federated entries are attributed to a key, not to a name, so a reader
+   * checking one needs to be able to ask for it that way.
+   */
+  routes.get('/api/key/:fingerprint', async (request, response) => {
+    const key = await store.keyByFingerprint(param(request, 'fingerprint'))
+    if (!key) {
+      response.status(404).json({ error: 'no key here with that fingerprint' })
+      return
+    }
+    response.json(key)
+  })
+
+  // ------------------------------------------------------------- certificates --
+
+  /**
+   * Publish a certificate.
+   *
+   * A signature is optional but is the whole point: unsigned, the row is only
+   * this server's word that a logged-in account said something, is marked
+   * `attested` so a reader can tell the difference, and — since there would be
+   * nothing for anyone else to check — never federates.
+   */
+  routes.post('/api/certificates', requireUser, async (request, response) => {
+    const body = request.body as { claim?: unknown; signature?: string }
+    const claim = parseClaim(body.claim)
+    if ('error' in claim) {
+      response.status(400).json({ error: claim.error })
+      return
+    }
+    const user = currentUser(request)
+    let assurance = 'attested'
+    let fingerprint: string | null = null
+    if (typeof body.signature === 'string' && body.signature.length > 0) {
+      const verdict = await verifySignature(claim, body.signature, await store.keysForIdentity(user.id))
+      if (!verdict.ok) {
+        response.status(400).json({ error: `signature did not verify: ${verdict.reason}` })
+        return
+      }
+      assurance = 'signed'
+      fingerprint = verdict.fingerprint ?? null
+    }
+    await store.upsertCertificate({
+      issuerId: user.id,
+      claim,
+      signature: body.signature ?? null,
+      fingerprint,
+      assurance,
+    })
+    response.json({ ok: true, assurance })
+  })
+
+  /**
+   * Withdraw a certificate.
+   *
+   * Unsigned, this only hides the row here — which is all it can do, since a
+   * copy that has already travelled is not this server's to take back.  A
+   * signed revocation (`POST /api/revocations`) is the form that federates.
+   */
+  routes.delete('/api/certificates/:hash', requireUser, async (request, response) => {
+    await store.revokeLocal(currentUser(request).id, param(request, 'hash'))
+    response.json({ ok: true, note: 'withdrawn here; publish a signed revocation to withdraw it everywhere' })
+  })
+
+  /**
+   * A signed withdrawal, which travels.
+   *
+   * Accepted from anyone, signed-in or not, because the signature is the
+   * authorisation: only the key that made an assertion can withdraw it, and
+   * requiring a session as well would mean a key-holder who has lost their
+   * account can never take a certificate back.
+   */
+  routes.post('/api/revocations', async (request, response) => {
+    const body = request.body as { revocation?: unknown; signature?: string; key?: string }
+    const revocation = parseRevocation(body.revocation)
+    if ('error' in revocation) {
+      response.status(400).json({ error: revocation.error })
+      return
+    }
+    const armored = body.key ?? (await store.keyByFingerprint(revocation.fingerprint))?.armored
+    if (!armored) {
+      response.status(400).json({ error: 'no key here with that fingerprint; send it with the revocation' })
+      return
+    }
+    const key = await readPublicKey(armored)
+    if ('error' in key) {
+      response.status(400).json({ error: key.error })
+      return
+    }
+    if (key.fingerprint !== revocation.fingerprint) {
+      response.status(400).json({ error: 'a revocation must be signed by the key it withdraws' })
+      return
+    }
+    const verdict = await verifyDetached(
+      canonicalRevocation(revocation),
+      body.signature ?? '',
+      [armored],
+    )
+    if (!verdict.ok || verdict.fingerprint !== revocation.fingerprint) {
+      response.status(400).json({ error: `signature did not verify: ${verdict.reason ?? 'wrong key'}` })
+      return
+    }
+    await store.upsertRevocation({
+      revocation,
+      signature: body.signature ?? '',
+      key: armored,
+      fingerprint: key.fingerprint,
+    })
+    response.json({ ok: true, canonical: canonicalRevocation(revocation) })
+  })
+
+  /**
+   * Who vouches for this declaration — here, and anywhere this node can reach.
+   *
+   * Returns the canonical claim bytes and the signature alongside the verdict,
+   * so a client can repeat the check rather than take this server's word for
+   * it.  `format=bundle` is the same answer in the shape a peer expects, which
+   * is how a relayed entry ends up checked by exactly the same rules as an
+   * imported one.
+   */
+  routes.get('/api/certificates', async (request, response) => {
+    const query = request.query as Record<string, string | undefined>
+    if (!query.hash && !query.fingerprint) {
+      response.status(400).json({ error: 'hash or fingerprint is required' })
+      return
+    }
+    const depth = query.depth === undefined ? config.policy.maxDepth : Number(query.depth)
+    const result = await answer(store, config, {
+      hash: query.hash,
+      hasher: query.hasher,
+      fingerprint: query.fingerprint,
+      depth: Number.isFinite(depth) ? Math.max(0, depth) : 0,
+      via: parseVia(query.via, config.policy.maxViaLength),
+    })
+
+    if (query.format === 'bundle') {
+      response.json({
+        protocol: PROTOCOL,
+        origin: config.publicUrl,
+        entries: result.certificates
+          .filter((certificate) => certificate.assurance === 'signed')
+          .map((certificate) => ({
+            claim: certificate.claim,
+            signature: certificate.signature,
+            key: certificate.key,
+            fingerprint: certificate.fingerprint,
+            hints: {
+              issuer: certificate.issuer,
+              keyVerifiedVia: certificate.keyVerifiedVia ?? undefined,
+              origin: certificate.provenance.origin || config.publicUrl,
+            },
+          })),
+        revocations: (await store.revocations({ hash: query.hash, hasher: query.hasher })).map(
+          (stored) => ({
+            revocation: stored.revocation,
+            signature: stored.signature,
+            key: stored.armoredKey,
+            fingerprint: stored.revocation.fingerprint,
+          }),
+        ),
+        complete: !result.truncated,
+      })
+      return
+    }
+
+    response.json({
+      certificates: result.certificates,
+      truncated: result.truncated,
+      askedPeers: result.askedPeers,
+    })
+  })
+
+  // ------------------------------------------------------------- federation --
+
+  routes.get('/api/federation', async (_request, response) => {
+    response.json(descriptorFor(config, await store.counts()))
+  })
+
+  /**
+   * Signed certificates, in cursor order, for a peer catching up.
+   *
+   * Public and unauthenticated: everything it returns is signed, and a
+   * signature carries the same weight to a stranger as to a friend.
+   */
+  routes.get('/api/certificates/export', async (request, response) => {
+    const query = request.query as Record<string, string | undefined>
+    const limit = Math.min(Number(query.limit) || config.policy.maxEntries, config.policy.maxEntries)
+    const after = parseCursor(query.since)
+    const page = await store.exportCertificates(after, limit)
+    const revocations = await store.exportRevocations(after, limit)
+    response.json({
+      protocol: PROTOCOL,
+      origin: config.publicUrl,
+      entries: page.certificates
+        .map((certificate) => toEntry(certificate, config.publicUrl))
+        .filter((entry) => entry !== null),
+      revocations: revocations.map((stored) => ({
+        revocation: stored.revocation,
+        signature: stored.signature,
+        key: stored.armoredKey,
+        fingerprint: stored.revocation.fingerprint,
+      })),
+      cursor: page.cursor,
+      complete: page.complete,
+    })
+  })
+
+  /**
+   * Accept a bundle somebody pushed.
+   *
+   * Every entry is checked against §3.4 before it is stored, so the worst an
+   * open import endpoint can do is fill a disk — which is why it wants an
+   * operator token on a public node, and nothing at all on a local one.
+   */
+  routes.post('/api/import', requireOperator, async (request, response) => {
+    const bundle = parseBundle(request.body)
+    if ('error' in bundle) {
+      response.status(400).json({ error: bundle.error })
+      return
+    }
+    response.json(await importBundle(store, bundle, bundle.origin ?? 'pushed'))
+  })
+
+  /** Peers this node actually queries.  Candidates and blocks stay private. */
+  routes.get('/api/peers', async (_request, response) => {
+    const peers = await store.listPeers(['seed', 'active'])
+    response.json({
+      peers: peers.map((peer) => ({
+        url: peer.url,
+        name: peer.name,
+        lastSeen: peer.lastSeenMs ? new Date(peer.lastSeenMs).toISOString() : null,
+      })),
+    })
+  })
+
+  routes.post('/api/peers/announce', async (request, response) => {
+    const { url } = request.body as { url?: string }
+    if (typeof url !== 'string') {
+      response.status(400).json({ error: 'url is required' })
+      return
+    }
+    const result = await announcePeer(store, config, url)
+    if ('error' in result) {
+      response.status(400).json(result)
+      return
+    }
+    response.json(result)
+  })
+
+  routes.get('/api/peers/all', requireOperator, async (_request, response) => {
+    response.json({ peers: await store.listPeers() })
+  })
+
+  const PEER_STATUSES = ['seed', 'active', 'candidate', 'blocked'] as const
+
+  routes.post('/api/peers/status/:status', requireOperator, async (request, response) => {
+    const { url } = request.body as { url?: string }
+    if (typeof url !== 'string') {
+      response.status(400).json({ error: 'url is required' })
+      return
+    }
+    // Validated here rather than in the path pattern: the two Express majors
+    // spell an inline pattern differently, and a route that silently stops
+    // matching is a worse failure than a 400.
+    const status = param(request, 'status') as (typeof PEER_STATUSES)[number]
+    if (!PEER_STATUSES.includes(status)) {
+      response.status(400).json({ error: `status must be one of ${PEER_STATUSES.join(', ')}` })
+      return
+    }
+    const existing = await store.peerByUrl(url)
+    if (!existing) await store.upsertPeer(url, '', status)
+    else await store.setPeerStatus(url, status)
+    response.json({ ok: true, url, status })
+  })
+
+  routes.post('/api/peers/pull', requireOperator, async (request, response) => {
+    const { url } = request.body as { url?: string }
+    response.json({
+      pulled: url ? [await pullFrom(store, config, url)] : await pullFromAll(store, config),
+    })
+  })
+
+  routes.post('/api/peers/discover', requireOperator, async (request, response) => {
+    const { url } = request.body as { url?: string }
+    if (typeof url !== 'string') {
+      response.status(400).json({ error: 'url is required' })
+      return
+    }
+    response.json({ learned: await discoverThrough(store, config, url) })
+  })
+
+  // -------------------------------------------------------------- trust lists --
+
+  routes.get('/api/trust-list', requireUser, async (request, response) => {
+    const id = currentUser(request).id
+    response.json({
+      trusted: await store.listFollows(id),
+      keys: await store.listKeyFollows(id),
+    })
+  })
+
+  routes.post('/api/trust-list/:login', requireUser, async (request, response) => {
+    const ok = await store.followLogin(currentUser(request).id, param(request, 'login'))
+    if (!ok) {
+      response.status(404).json({ error: 'nobody here by that name has published anything' })
+      return
+    }
+    response.json({ ok: true })
+  })
+
+  routes.delete('/api/trust-list/:login', requireUser, async (request, response) => {
+    await store.unfollowLogin(currentUser(request).id, param(request, 'login'))
+    response.json({ ok: true })
+  })
+
+  /**
+   * Follow a key.
+   *
+   * The portable half of a trust list: a login only means something on the
+   * server that issued it, and a certificate that arrives from three hops away
+   * carries a fingerprint and nothing else you could have checked.
+   */
+  routes.post('/api/trust-keys/:fingerprint', requireUser, async (request, response) => {
+    const fingerprint = param(request, 'fingerprint').toLowerCase()
+    if (!/^[0-9a-f]{16,64}$/.test(fingerprint)) {
+      response.status(400).json({ error: 'that is not a fingerprint' })
+      return
+    }
+    const { label } = request.body as { label?: string }
+    await store.followKey(currentUser(request).id, fingerprint, (label ?? '').slice(0, 100))
+    response.json({ ok: true })
+  })
+
+  routes.delete('/api/trust-keys/:fingerprint', requireUser, async (request, response) => {
+    await store.unfollowKey(currentUser(request).id, param(request, 'fingerprint'))
+    response.json({ ok: true })
+  })
+
+  /**
+   * Every hash your trust list vouches for.
+   *
+   * What the frontend actually needs: one flat set it can turn into trusted
+   * declarations.  Non-transitive by construction — the joins go one hop, so
+   * trusting someone never silently enrols the people they trust, and
+   * federation widens who you can hear from rather than whom you trust.
+   */
+  routes.get('/api/trusted', requireUser, async (request, response) => {
+    const { hasher } = request.query as { hasher?: string }
+    const hashes = await store.trustedHashes(currentUser(request).id, hasher)
+    const revocations = await store.revocations({ hasher })
+    response.json({
+      // Withdrawals apply here too.  A trusted set that kept counting a
+      // certificate its issuer had taken back would be the one place the
+      // withdrawal did not arrive — and the place it matters most, since this
+      // is what decides where a dependency tree stops.
+      hashes: hashes.filter(
+        (row) =>
+          !isSuppressed(
+            { fingerprint: row.fingerprint, claim: { ...row, asserted: row.asserted } },
+            revocations,
+          ),
+      ),
+    })
+  })
+
+  return routes
+}
+
+/** Exported for the tests, which assemble claims the same way a client does. */
+export { canonicalClaim }
+export type { Request, Response }

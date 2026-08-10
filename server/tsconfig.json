@@ -10,5 +10,7 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "//": "Tests and their helpers are run by vitest, which resolves modules as ESM, and are the one thing the shipped image has no use for.  `tsconfig.test.json` type-checks them.",
+  "exclude": ["src/**/*.test.ts", "src/testing"]
 }

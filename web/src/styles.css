@@ -1309,6 +1309,124 @@ h1 {
   color: var(--accent);
 }
 
+/* Written somewhere else and relayed here.  Worth marking, because the reader's
+   recourse is different: the issuing server's word is not available, and all
+   that stands behind it is a signature they can check themselves. */
+.certificate-relayed {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* The check the reader does rather than the one the server reports.  Neutral
+   until pressed: claiming a verdict before anyone asked for one would make the
+   button decoration. */
+.certificate-check {
+  padding: 2px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.certificate-check:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.certificate-check.good {
+  border-color: var(--data);
+  color: var(--data);
+}
+
+.certificate-check.bad {
+  border-color: var(--axiom);
+  color: var(--axiom);
+  font-weight: 600;
+}
+
+/* An incomplete answer, said out loud.  "Nobody vouches for this" and "I could
+   not find out" are different sentences, and only one is a reason to worry. */
+.who-trusts-truncated {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
+/* Which database is being read.  A fact about the answers on screen, so it sits
+   with the other view controls rather than in a settings page. */
+.server-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 12px;
+  font-family: inherit;
+}
+
+.server-picker:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.server-picker.unreachable {
+  border-color: var(--axiom);
+  color: var(--axiom);
+}
+
+.server-picker.editing {
+  cursor: default;
+  gap: 4px;
+  padding: 2px 6px;
+}
+
+.server-name {
+  font-weight: 600;
+}
+
+.server-peers {
+  color: var(--muted);
+}
+
+.server-input {
+  min-width: 22ch;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.server-picker.editing button {
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+/* Keys, listed apart from names: the two are followed for different reasons and
+   only one of them keeps its meaning on another server. */
+.follows-keys .follows-login {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+
 /* Declaring trust from the browser.  Signing is offered beside it rather than
    in place of it: an assertion from a signed-in account is worth something, and
    demanding a key would mean most declarations never get vouched for at all. */

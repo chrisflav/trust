@@ -41,6 +41,27 @@ export interface Certificate {
 /** Whether a certificate carries proof, or only this server's word for it. */
 export type Assurance = 'signed' | 'attested' | 'invalid'
 
+/**
+ * A withdrawal, signed by the key that made the assertion.
+ *
+ * A `revoked_at` column is a fact about one database.  Once a certificate can
+ * travel, its withdrawal has to travel too, and has to be exactly as checkable
+ * as the assertion was — otherwise the cheapest attack on the network is to
+ * tell everyone that somebody else's certificate was withdrawn.
+ *
+ * See §6 of FEDERATION.md.  A revocation suppresses the certificates with the
+ * same `(fingerprint, hash, hasher)` whose `asserted` is not later than
+ * `revoked`, so re-issuing afterwards reinstates without a second message.
+ */
+export interface Revocation {
+  fingerprint: string
+  hash: string
+  hasher: string
+  reason: string
+  /** RFC 3339, UTC. */
+  revoked: string
+}
+
 const CLAIM_FIELDS: (keyof Claim)[] = [
   'asserted',
   'commit',
@@ -86,23 +107,74 @@ export function parseClaim(value: unknown): Claim | { error: string } {
   return out as unknown as Claim
 }
 
+const REVOCATION_FIELDS: (keyof Revocation)[] = [
+  'fingerprint',
+  'hash',
+  'hasher',
+  'reason',
+  'revoked',
+]
+
+/** The bytes a revocation's signature covers.  Same rules as `canonicalClaim`. */
+export function canonicalRevocation(revocation: Revocation): string {
+  const parts = REVOCATION_FIELDS.map(
+    (field) => `${JSON.stringify(field)}:${JSON.stringify(revocation[field])}`,
+  )
+  return `{${parts.join(',')}}`
+}
+
+export function parseRevocation(value: unknown): Revocation | { error: string } {
+  if (typeof value !== 'object' || value === null) return { error: 'revocation must be an object' }
+  const raw = value as Record<string, unknown>
+  const out: Record<string, string> = {}
+  for (const field of REVOCATION_FIELDS) {
+    const got = raw[field]
+    if (field === 'reason') {
+      out[field] = typeof got === 'string' ? got : ''
+      continue
+    }
+    if (typeof got !== 'string' || got.length === 0) return { error: `revocation.${field} is required` }
+    out[field] = got
+  }
+  if (!/^[0-9a-f]{16,128}$/.test(out.hash)) return { error: 'revocation.hash must be lower-case hex' }
+  if (!/^[0-9a-fA-F]{16,64}$/.test(out.fingerprint)) {
+    return { error: 'revocation.fingerprint must be hex' }
+  }
+  out.fingerprint = out.fingerprint.toLowerCase()
+  if (Number.isNaN(Date.parse(out.revoked))) return { error: 'revocation.revoked must be a timestamp' }
+  return out as unknown as Revocation
+}
+
+export interface Verdict {
+  ok: boolean
+  /** Fingerprint of the key that actually made the signature. */
+  fingerprint?: string
+  reason?: string
+}
+
 /**
- * Check a detached signature against the claim and a set of public keys.
+ * Check a detached signature over `text` against a set of public keys.
  *
  * The server does this so it can store the verdict and answer "who trusts
  * this" quickly — but it stores it as a *cache*, and hands back everything a
  * client needs to repeat the check itself.  A tool whose subject is trust
  * should not ask to be taken at its word, and a compromised server that can
  * fabricate `attested` rows still cannot forge one of these.
+ *
+ * The signing key has to be *identified*, not merely present: openpgp will
+ * confirm a signature against a bundle without saying which key in it signed,
+ * and a verdict that cannot name the key is useless for attributing anything.
+ * So a signature whose key is not among those offered is a failure here, even
+ * though the cryptography succeeded.
  */
-export async function verifySignature(
-  claim: Claim,
+export async function verifyDetached(
+  text: string,
   armoredSignature: string,
   armoredKeys: string[],
-): Promise<{ ok: boolean; fingerprint?: string; reason?: string }> {
-  if (armoredKeys.length === 0) return { ok: false, reason: 'issuer has no public key on file' }
+): Promise<Verdict> {
+  if (armoredKeys.length === 0) return { ok: false, reason: 'no public key to check against' }
   try {
-    const message = await openpgp.createMessage({ text: canonicalClaim(claim) })
+    const message = await openpgp.createMessage({ text })
     const signature = await openpgp.readSignature({ armoredSignature })
     const keys = await Promise.all(armoredKeys.map((armoredKey) => openpgp.readKey({ armoredKey })))
     const result = await openpgp.verify({ message, signature, verificationKeys: keys })
@@ -113,8 +185,45 @@ export async function verifySignature(
     const key = keys.find((candidate) =>
       candidate.getKeys().some((sub) => sub.getKeyID().toHex() === keyID),
     )
-    return { ok: true, fingerprint: key?.getFingerprint() }
+    if (!key) return { ok: false, reason: 'signature is not from any of the offered keys' }
+    return { ok: true, fingerprint: key.getFingerprint().toLowerCase() }
   } catch (error) {
     return { ok: false, reason: String(error instanceof Error ? error.message : error) }
+  }
+}
+
+export function verifySignature(
+  claim: Claim,
+  armoredSignature: string,
+  armoredKeys: string[],
+): Promise<Verdict> {
+  return verifyDetached(canonicalClaim(claim), armoredSignature, armoredKeys)
+}
+
+/**
+ * Read an armored public key, refusing a private one.
+ *
+ * A private key block parses perfectly well as a key, so "it loaded" is not the
+ * check.  Nothing in this server has any use for signing material, and the way
+ * to guarantee it never leaks it is to never hold it.
+ */
+export async function readPublicKey(
+  armored: string,
+): Promise<{ fingerprint: string } | { error: string }> {
+  if (typeof armored !== 'string') return { error: 'expected an armored PGP public key' }
+  // Checked before the public-key check so that someone who pastes the wrong
+  // half is told what they actually did, rather than that it is not a key.
+  if (armored.includes('PRIVATE KEY BLOCK')) {
+    return { error: 'that is a private key — never send one here' }
+  }
+  if (!armored.includes('BEGIN PGP PUBLIC KEY BLOCK')) {
+    return { error: 'expected an armored PGP public key' }
+  }
+  try {
+    const key = await openpgp.readKey({ armoredKey: armored })
+    if (key.isPrivate()) return { error: 'that is a private key — never send one here' }
+    return { fingerprint: key.getFingerprint().toLowerCase() }
+  } catch (error) {
+    return { error: `unreadable key: ${String(error instanceof Error ? error.message : error)}` }
   }
 }

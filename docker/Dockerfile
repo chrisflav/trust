@@ -19,6 +19,13 @@ COPY server/package.json server/package-lock.json* ./
 RUN npm install --omit=dev --no-audit --no-fund && npm cache clean --force
 COPY --from=build /app/dist ./dist
 
+# For a node whose store is a SQLite file rather than Postgres.  Created here so
+# that a named volume mounted over it inherits this ownership: Docker copies the
+# image's for an empty volume, and a root-owned one would leave the unprivileged
+# process below unable to write its own database.
+RUN mkdir -p /data && chown node:node /data
+VOLUME /data
+
 # Runs unprivileged; the node image already provides this user.
 USER node
 EXPOSE 8080
