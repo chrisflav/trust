@@ -260,9 +260,16 @@ runs:
         # is the whole point of the input, so it goes somewhere else entirely.
         if [ -n "$TRUST_REF" ]; then
           TRUST_SRC="$GITHUB_WORKSPACE/.trust-source"
+          mkdir -p "$TRUST_SRC"
         else
           TRUST_SRC="$ACTION_PATH"
         fi
+        # Resolved, because `github.action_path` for a local `uses: ./` is the
+        # workspace with a `/.` on the end, and `actions/cache` refuses a path
+        # containing one — as a warning in its post step, so the cache silently
+        # stores nothing and every run rebuilds trust from scratch.  It also
+        # keeps the `trust-bin` output a path a caller can print.
+        TRUST_SRC="$(cd "$TRUST_SRC" && pwd -P)"
 
         FLAGS=""
         if [ "$WITH_BODIES" = true ]; then FLAGS="$FLAGS --with-bodies"; fi
@@ -308,9 +315,14 @@ runs:
       run: |
         set -euo pipefail
 
+        # The annotation goes to stderr because this runs inside a command
+        # substitution, which would otherwise capture it as the toolchain: a
+        # package with no `lean-toolchain` of its own — a monorepo subdirectory,
+        # say — would fail this step with nothing in the log but an exit code,
+        # from the one step whose whole purpose is to say what went wrong.
         read_toolchain () {
           if [ ! -f "$1/lean-toolchain" ]; then
-            echo "::error::no lean-toolchain in '$1'"
+            echo "::error::no lean-toolchain in '$1'" >&2
             exit 1
           fi
           tr -d '[:space:]' < "$1/lean-toolchain"

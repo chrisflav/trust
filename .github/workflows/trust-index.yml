@@ -31,6 +31,13 @@ jobs:
           index-name: core-gcd
           with-bodies: 'true'
           with-code: 'true'
+          # What a `pull_request` checks out is a merge commit that exists on no
+          # branch and outlives nothing, so an index stamped with it is pinned to
+          # a revision nobody can resolve.  This is the case the `rev` input is
+          # for, and taking our own advice is the point of running this here.
+          # Empty on `workflow_dispatch`, where the checkout is a real commit and
+          # `trust` reads it from git itself.
+          rev: ${{ github.event.pull_request.head.sha }}
 
       # An action that runs without failing has not shown that it produced
       # anything: `trust export` writes its files whatever it found, so the
