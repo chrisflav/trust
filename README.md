@@ -106,7 +106,7 @@ own:
 ```bash
 cd /path/to/mathlib4
 lake env /path/to/trust/.lake/build/bin/trust sync-marks \
-  --repo mathlib --out /path/to/trust/web/public/index \
+  --repo mathlib --out /path/to/index \
   --marks /path/to/trust/trust-marks.json Mathlib
 ```
 
@@ -114,13 +114,25 @@ That takes about ten seconds.  Note the explicit `--marks`: the export runs
 inside the *target* repository, so the default of `trust-marks.json` in the
 working directory is that repository's, not `trust`'s.
 
-## The frontend
-
-The web UI reads a precomputed static index.  Generate one, then serve it:
+Marks can also be edited from the frontend while `trust serve-marks` is running,
+which is what answers `/api/marks` there:
 
 ```bash
-./.lake/build/bin/trust export --repo core --out web/public/index --with-bodies --with-code Init
-cd web && npm install && npm run dev
+lake env /path/to/trust/.lake/build/bin/trust serve-marks --marks trust-marks.json MyLibrary
+```
+
+Given a module it holds that module's environment, so a declaration protected
+from the browser records its hash on the spot rather than reading as
+`protected, no snapshot` until someone runs `trust protect`.  Snapshots are
+merged on the server side: the browser says which declarations are marked and
+why, and never sends the history, which it has no way to know.
+
+## Exporting an index
+
+The frontend reads a precomputed static index.  Generate one:
+
+```bash
+./.lake/build/bin/trust export --repo core --out index --with-bodies --with-code Init
 ```
 
 `--with-bodies` also exports the edges that come from definition bodies.  Without
@@ -136,17 +148,6 @@ touched.  For Lean core that rule is 89% of the body edges.
 clickable.  It is sharded under `code/` and fetched on demand, since it is the
 largest part of an index.  For Lean core the whole export takes about 30 seconds
 and produces roughly 40 MB, of which 25 MB is code.
-
-Marks are shown next to the declaration they are about, and can be edited from
-the browser while `npm run dev` is running: a Vite middleware (`web/marksApi.ts`)
-reads and writes `trust-marks.json`.  A deployed index is a static site with
-nowhere to write, so it shows marks read-only.
-
-Editing from the browser records *which* declarations are marked; recording a
-content hash still needs Lean, so a declaration protected from the UI reads as
-`protected, no snapshot` until `trust protect` is run for it.  The dev server
-merges the existing snapshot history on every write, so editing from the browser
-never discards hashes the browser does not know about.
 
 ## Generating an index in CI
 
@@ -240,216 +241,26 @@ own exporter, so a change here is tested through the thing that will ship it.
 
 ### Pointing the interface at the result
 
-The frontend reads `<root>/<name>/meta.json`, and `?repo=` selects the name, so
-an artifact downloaded from CI is unpacked and served as it stands:
+The frontend is [chrisflav/trust-web](https://github.com/chrisflav/trust-web).
+It reads `<root>/<name>/meta.json`, and `?repo=` selects the name, so an artifact
+downloaded from CI is unpacked and served as it stands:
 
 ```bash
-unzip trust-index.zip -d web/public/index
-cd web && npm run dev      # http://localhost:5173/?repo=mylibrary
+unzip trust-index.zip -d /path/to/trust-web/public/index
+cd /path/to/trust-web && npm run dev    # http://localhost:5173/?repo=mylibrary
 ```
 
-A deployed instance is the same thing: `docker/docker-compose.yml` bind-mounts
-`web/public/index`, so replacing a directory under it publishes a new index
-without rebuilding anything.
+A deployed instance bind-mounts the same directory, so replacing a directory
+under it publishes a new index without rebuilding anything.
 
-The CLI operates on a downloaded index too — `trust sync-marks` refreshes the
-judgements in one in seconds, without the export that produced it:
+The exporter operates on a downloaded index too — `trust sync-marks` refreshes
+the judgements in one in seconds, without the export that produced it:
 
 ```bash
 cd /path/to/mylibrary
 lake env /path/to/trust/.lake/build/bin/trust sync-marks \
-  --repo mylibrary --out /path/to/trust/web/public/index \
-  --marks trust-marks.json MyLibrary
+  --repo mylibrary --out /path/to/index --marks trust-marks.json MyLibrary
 ```
-
-## Trust certificates (server)
-
-A certificate is one person's assertion about one declaration, keyed by its
-**semantic hash** rather than its name.  `semantic_hash` computes that over the
-definitional closure, so a declaration's hash incorporates the hashes of
-everything it references: vouching for a hash vouches for the whole subtree
-beneath it, and any change in meaning underneath invalidates the certificate on
-its own.  It also makes certificates portable — one written against Mathlib at
-one commit applies anywhere that declaration still hashes the same.
-
-The hash is deliberately blind to anything that is not meaning.  `trust
-hash-invariants` checks this rather than asserting it: renaming a declaration or
-its binders, or making an argument implicit instead of explicit, leaves the hash
-untouched, while genuinely different definitions still differ.
-
-Bring the server up:
-
-```bash
-cd docker
-cp .env.example .env      # fill in SESSION_SECRET and a GitHub OAuth app
-docker compose up --build
-```
-
-Postgres is not published to the host, and the server runs unprivileged.
-
-### Deploying
-
-`deploy/trust.merten.dev.conf` puts Apache in front of the compose stack, with
-the frontend at `/` and the server at `/api/` and `/auth/` on **one origin**.
-That is worth insisting on: same-origin means no CORS at all, and a first-party
-session cookie, which browsers increasingly refuse to send cross-site however
-correctly it is labelled.
-
-```bash
-a2enmod proxy proxy_http ssl headers rewrite
-cp deploy/trust.merten.dev.conf /etc/apache2/sites-available/
-a2ensite trust.merten.dev && apachectl configtest && systemctl reload apache2
-certbot --apache -d trust.merten.dev
-```
-
-In `docker/.env`:
-
-```bash
-PUBLIC_URL=https://trust.merten.dev
-APP_URL=https://trust.merten.dev
-COOKIE_SECURE=true
-BIND_ADDR=127.0.0.1        # containers must not be reachable past the proxy
-```
-
-and set the OAuth App's callback to
-`https://trust.merten.dev/auth/github/callback`.
-
-The frontend bakes the server URL in at build time, so after changing
-`PUBLIC_URL` run `docker compose up --build web`.
-
-### What the server is, and is not
-
-It is a place to publish and find certificates.  It is **not** a trusted party:
-
-* **Private keys are never uploaded.**  Signing happens on the machine that
-  holds the key; the server takes public keys only, and refuses anything that
-  looks like a private one.
-* **Signature checks are a cache, not the authority.**  Every certificate is
-  returned with the canonical bytes that were signed, so a client can repeat the
-  check itself.  A compromised server can withhold certificates or fabricate
-  `attested` ones — it cannot forge a `signed` one.
-* **Trust is not transitive.**  Trusting someone counts their certificates and
-  nobody else's; it never silently enrols the people they trust.
-
-| assurance | means |
-|---|---|
-| `signed` | an OpenPGP signature over the claim verified against the issuer's key |
-| `attested` | a signed-in GitHub account asserted it, on this server's word alone |
-
-A key also records whether it was found among the account's published GitHub
-keys (`github`) or merely uploaded here (`self`), which is a materially
-different claim about who owns it.
-
-## Federation
-
-There is no central trust database, and this one is not it.  A server is a
-*node*: it holds the certificates published to it, learns others from the nodes
-it talks to, and passes on questions it cannot answer.  The protocol is
-[FEDERATION.md](FEDERATION.md); what follows is how to use it.
-
-The organising rule is that a node relays other people's assertions and is never
-a party to them.  So:
-
-* **Only signed certificates federate.**  `attested` means "a signed-in account
-  said so, and this server vouches for that", which is not something a third
-  party can check or repeat — so it stays where it was made.
-* **Identity across a boundary is a key fingerprint**, not a login.  A node can
-  verify that a key signed something; it cannot verify who owns the key.  Names
-  travel as unverified hints and are shown as such.
-* **Every federated entry is checked before it is stored**, and is handed back
-  with the public key and the exact bytes that were signed, so you can check it
-  again yourself — in the browser, or with `trust cert verify-bundle`.
-
-### Your own database
-
-A local trust database is the same server with a different store and no public
-surface: SQLite instead of Postgres, no OAuth, one identity.
-
-```bash
-cd server && npm install && npm run build && npm run local
-```
-
-It listens on `:8090` and keeps its data in `~/.local/share/trust/trust.db`
-(`SQLITE_PATH` to move it).  Point the CLI at it and publish as normal:
-
-```bash
-export TRUST_SERVER=http://127.0.0.1:8090
-trust cert issue Init.Data.Nat.Gcd Nat.gcd -o gcd.json
-trust cert sign gcd.json
-trust cert publish gcd.json
-```
-
-That it is the same code as a public node is the point.  "Your own database" and
-"a public database" differ in deployment, not in kind.
-
-### Importing from another database
-
-Nothing about pulling somebody's certificates requires their permission or
-yours: a node's export is public, because everything in it is signed.
-
-```bash
-# Look at what a node has, checking every signature here before believing any
-# of it — in a throwaway gpg keyring, so your own is untouched.
-trust cert verify-bundle --from https://trust.merten.dev
-
-# The same check, then hand what survives to your own database.
-trust cert import --from https://trust.merten.dev --server http://127.0.0.1:8090
-```
-
-`verify-bundle` is the command that makes a server unnecessary rather than
-trusted: it repeats, locally, precisely the check the server claims to have
-done.
-
-### Talking to other nodes
-
-A node reads its starting peers from `FEDERATION_SEEDS`.  Everything else is the
-operator's decision, through endpoints that need `ADMIN_TOKEN`:
-
-```bash
-curl -X POST $SERVER/api/peers/pull          -H "Authorization: Bearer $ADMIN_TOKEN" -d '{}'
-curl -X POST $SERVER/api/peers/status/active -H "Authorization: Bearer $ADMIN_TOKEN" \
-     -H 'Content-Type: application/json' -d '{"url":"https://other.example.org"}'
-```
-
-Anyone may *announce* a node (`POST /api/peers/announce`), and a node so
-announced is recorded as a `candidate` — never queried until the operator
-promotes it, unless `FEDERATION_AUTODISCOVER` is on.  The announced URL is
-checked against what that node says its own address is, which is what stops this
-endpoint being used to make your server probe addresses on your network.
-
-To watch two nodes federate:
-
-```bash
-cd docker && docker compose --profile federation up --build
-```
-
-### Asking a question that travels
-
-```
-GET /api/certificates?hash=<h>&hasher=<name>&depth=2
-```
-
-The node answers from its own store and its cache, and — if `depth` allows —
-asks its peers the same question, one hop shallower.  Fan-out runs under a
-wall-clock budget rather than a peer count, and an answer that may be short says
-so: *nobody vouches for this* and *I could not find out* are different sentences.
-
-Certificates come back labelled with where they came from, and the frontend
-offers a **check it yourself** button next to each one, which verifies the
-signature in the page against the key that travelled with it.
-
-### Withdrawing a certificate
-
-Deleting a row hides it on one server.  Once certificates travel, a withdrawal
-has to be as checkable as the assertion was, so it is signed by the same key:
-
-```bash
-trust cert revoke gcd.json --note "the proof was wrong" --server $TRUST_SERVER
-```
-
-Only the key that made an assertion can withdraw it, and a *later* certificate
-for the same content reinstates it — so re-issuing after a withdrawal is
-ordinary and needs no second message.
 
 ### Index layout
 
@@ -471,24 +282,105 @@ To index another repository, run the export inside it:
 ```bash
 cd /path/to/mathlib4
 lake env /path/to/trust/.lake/build/bin/trust export \
-  --repo mathlib --out /path/to/trust/web/public/index --with-bodies Mathlib
+  --repo mathlib --out /path/to/index --with-bodies Mathlib
 ```
+
+## The four repositories
+
+This one is the core: the exporter, the index format, and the rules the rest of
+the system agrees on.  Everything else that used to live here now lives beside
+it, because it was versioned by something different.
+
+| repository | what it is |
+|---|---|
+| **chrisflav/trust** | this one — the Lean library, the `trust` exporter, `FEDERATION.md`, and `conformance/` |
+| [chrisflav/trust-cli](https://github.com/chrisflav/trust-cli) | `trust-cert`: issue, sign, view, publish, fetch and import certificates |
+| [chrisflav/trust-server](https://github.com/chrisflav/trust-server) | a certificate node: storage, sessions, federation |
+| [chrisflav/trust-web](https://github.com/chrisflav/trust-web) | the frontend |
+| [chrisflav/trust-action](https://github.com/chrisflav/trust-action) | the GitHub action that drives the exporter |
+
+The first three are Lean and depend on this library.  The frontend is
+TypeScript, and deliberately so: it is where a reader checks a signature they
+were handed, in their own browser, and a second implementation of the protocol
+is worth more there than anywhere else.
+
+### Certificates
+
+A certificate is one person's assertion about one declaration, keyed by its
+**semantic hash** rather than its name.  `semantic_hash` computes that over the
+definitional closure, so a declaration's hash incorporates the hashes of
+everything it references: vouching for a hash vouches for the whole subtree
+beneath it, and any change in meaning underneath invalidates the certificate on
+its own.  It also makes certificates portable — one written against Mathlib at
+one commit applies anywhere that declaration still hashes the same.
+
+The hash is deliberately blind to anything that is not meaning.  `trust
+hash-invariants` checks this rather than asserting it: renaming a declaration or
+its binders, or making an argument implicit instead of explicit, leaves the hash
+untouched, while genuinely different definitions still differ.
+
+Issuing and publishing them is `trust-cert`:
+
+```bash
+export TRUST_SERVER=https://trust.merten.dev
+trust-cert issue Init.Data.Nat.Gcd Nat.gcd -o gcd.json
+trust-cert sign gcd.json
+trust-cert publish gcd.json
+```
+
+What this library provides is the part both ends have to agree on: the claim
+types, the canonical bytes a signature covers, and `Trust.Federation`, which is
+`FEDERATION.md`'s acceptance rules as code.  `trust-cert verify-bundle` and a
+node's import path call the same function, which is what makes "repeat the check
+the server claims to have done" a fact about the code rather than a promise.
+
+### Federation
+
+There is no central trust database.  A server is a *node*: it holds the
+certificates published to it, learns others from the nodes it talks to, and
+passes on questions it cannot answer.  The protocol is
+[FEDERATION.md](FEDERATION.md), and it is written as a protocol rather than as
+documentation of an implementation because the point of federating is that the
+other end is not this code.
+
+Three consequences worth stating here, since they shape everything above:
+
+* **Only signed certificates federate.**  `attested` means "a signed-in account
+  said so, and this server vouches for that", which is not something a third
+  party can check or repeat — so it stays where it was made.
+* **Identity across a boundary is a key fingerprint**, not a login.  Names
+  travel as unverified hints and are shown as such.
+* **Trust is not transitive.**  Trusting someone counts their certificates and
+  nobody else's.
+
+### Conformance
+
+`conformance/` is the contract between this implementation and the browser's:
+the canonical form of a claim and of a revocation, a node descriptor, an entry
+that must be accepted, and one entry for each way §3.4 says to refuse.
+
+```bash
+./.lake/build/bin/trust conformance --check      # against the committed vectors
+./.lake/build/bin/trust conformance --out conformance   # regenerate them
+```
+
+They are generated rather than written, because a vector that was typed says
+what somebody thought the implementation did.  The one worth reading is
+`fingerprint-is-the-subkey`: gpg signs with a subkey, so that entry has a valid
+signature and names a fingerprint that really is in the key bundle, and must
+still be refused, because rule 3 asks for the primary.  An implementation that
+confuses those two passes every other vector in the file.
 
 ## Tests
 
 ```bash
-cd web    && npm test
-cd server && npm test && npm run typecheck
+lake test
 ```
 
-The frontend suite includes a check against a real exported index, which is
-skipped when none has been generated.
-
-The server suite starts three real nodes on loopback and federates between them:
-a certificate published to one is found through another, a tampered one is
-refused, a question travels two hops, a relay loop is refused, and a signed
-withdrawal propagates.  It runs on SQLite, which is also what local mode uses,
-so the store both backends share is exercised by every test in it.
+Timestamps, the canonical bytes, the address rules of §5.4, the protocol's
+decisions, and acceptance against real gpg keys with real signing subkeys.  The
+signature tests skip loudly when `gpg` is absent rather than passing quietly — a
+suite that reports success because it did nothing is worse than one that fails.
 
 ## License
 
