@@ -43,7 +43,7 @@ rather than from memory.  `Std` has grown most of a server runtime:
 | JSON | `JSON` | `Lean.Json` | already used |
 | CLI arguments | hand-rolled | `leanprover/lean4-cli` | maintained, tracks Lean stable |
 | tests | vitest | `argumentcomputer/LSpec` + `lake test` | maintained |
-| SQLite | `node:sqlite` | `leanprover/leansqlite` | official; API "likely to change"; pins **v4.34.0-rc1** |
+| SQLite | `node:sqlite` | `leanprover/leansqlite` | official; API "likely to change"; **a tag per Lean release**, `v4.32.0` among them |
 | Postgres | `pg` | — | no driver found. **Drop Postgres** |
 | HTTPS client | `fetch` | — | `curl` subprocess, as the CLI does today |
 | TLS | `node:tls` | — | inbound is terminated by the proxy already |
@@ -59,10 +59,15 @@ Two findings change the shape of the plan.
 `keepAliveTimeout`, `maxConnections` — so most of `FEDERATION.md` §8 becomes
 configuration rather than hand-written checks.
 
-`leansqlite` pins **v4.34.0-rc1**, and this repository is on v4.32.0.  The server
-work therefore rides a toolchain bump; that is routine here (`fc94653`), and the
-release convention already accommodates it — a `v4.34.0` tag is what the action
-resolves for a library on that toolchain.
+`leansqlite` releases a tag per Lean version, and `v4.32.0` is one of them — the
+same convention this repository uses, and for the same reason.  So the store
+needs no toolchain bump: it needs a C compiler at build time, for the SQLite
+amalgamation, which CI and the container image both have.
+
+(An earlier draft of this plan read only `main`'s `lean-toolchain`, saw
+v4.34.0-rc1, and concluded a bump was unavoidable.  It is worth saying where
+that went, because the store was designed around it for a while: see the
+appendix.)
 
 ## 2. What the rewrite buys
 
@@ -256,7 +261,7 @@ The rewrite simplifies this to almost one axis.
 
 | axis | who reads it | changes when |
 |---|---|---|
-| toolchain tag `v4.34.0` | `trust-action`, and now the server and CLI repositories too | Lean moves |
+| toolchain tag `v4.32.0` | `trust-action`, and now the server and CLI repositories too | Lean moves |
 | wire protocol `trust/1` | every node, every stranger's node | the format changes incompatibly — ideally never |
 | index schema in `meta.json` | the frontend | the exported layout changes |
 
@@ -426,7 +431,6 @@ exercise.
 
 ## 11. Chores
 
-- [ ] Bump to a toolchain ≥ 4.34 and cut the tag, since `leansqlite` needs it
 - [ ] `LICENSE` and the experimental/LLM-generated warning into all four
 - [ ] Repository descriptions and a link back to core from each
 - [ ] `trust-action`'s README links to core, and stays correct
@@ -444,8 +448,9 @@ Ecosystem claims above were checked rather than recalled.
 * Lean toolchain contents: `~/.elan/toolchains/leanprover--lean4---v4.32.0`
 * [leanprover/leansqlite](https://github.com/leanprover/leansqlite) — official
   SQLite bindings; higher-level API "more experimental… likely to change"
-* [leanprover/leansqlite `lean-toolchain`](https://raw.githubusercontent.com/leanprover/leansqlite/main/lean-toolchain)
-  — pins v4.34.0-rc1
+* [leanprover/leansqlite tags](https://github.com/leanprover/leansqlite/tags) — a
+  tag per Lean release; `v4.32.0` is the one this toolchain takes.  `main` is on
+  v4.34.0-rc1, which is what an earlier draft of this plan read instead
 * [leanprover/lean4-cli](https://github.com/leanprover/lean4-cli) — CLI parsing
 * [argumentcomputer/LSpec](https://github.com/argumentcomputer/LSpec) — testing
 * [algebraic-dev/http](https://github.com/algebraic-dev/http) — the HTTP work
@@ -467,18 +472,21 @@ lines, and `Std.Http.Server.Config` covers most of §8 as configuration.  `gpg
 are both checkable, and the per-verification cost is a process spawn the
 workload can afford.  The store spike went the other way.
 
-**The store is an append-only log, not SQLite.**  `leansqlite` needs a C
-compiler and pins `v4.34.0-rc1`; adopting it would have forced a toolchain bump
-on core, and therefore on the pinned `semantic_hash` revision that every
-certificate hash depends on.  A log of JSONL with an in-memory index costs about
-850 lines, needs no C, and fits §4.3's cursor exactly — the cursor *is*
-`(updatedAt, seq)`.  So the toolchain never moved: everything is still on
-v4.32.0, and the "bump to ≥ 4.34" chore above is void.
+**The store was an append-only log for a while, on a premise that was false.**
+I read only `main`'s `lean-toolchain`, saw v4.34.0-rc1, and concluded that
+`leansqlite` would force a toolchain bump on core — and therefore on the pinned
+`semantic_hash` revision that every certificate hash depends on.  That would
+have been a real reason.  But `leansqlite` tags a release per Lean version, the
+same convention this repository uses, and `v4.32.0` is one of them.  Checking
+the default branch of a dependency and not its tags is a cheap mistake to make
+and an expensive one to build on: the log was about 850 lines, and every one of
+them existed because of it.
 
-One real cost, stated plainly: **v4.32.0 exposes no `fsync`**.  A write is
-`putStr`, `flush`, and then `sync --data` as a subprocess when durability is
-switched on.  A C shim would fix it and would reintroduce the dependency the log
-was chosen to avoid.
+The store is SQLite.  What is true of the log and worth keeping in mind: it
+needed no C compiler, and v4.32.0 exposes no `fsync`, so its durability went
+through a `sync --data` subprocess.  SQLite needs a C toolchain at build time —
+which CI and the image both have — and does its own durability, so that hack is
+gone with it.
 
 **The npm package was never needed.**  With the server and the CLI in Lean there
 is no second TypeScript consumer, so `conformance/` is the whole contract, and
