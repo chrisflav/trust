@@ -182,9 +182,12 @@ closure is indexed, exactly the argument `trust export` takes.  Everything else
 has a default — the index is named after the repository, written to
 `trust-index/<name>/`, and the library is built first, since the export reads
 `.olean` files and something has to have produced them.  Statement edges, body
-edges and rendered code are all exported; semantic hashes are not, because that
-is a further whole-environment pass and only an index that will be held up
-against trust certificates needs them (`with-hashes: 'true'`).
+edges, rendered code and semantic hashes are all exported.  The hashes are a
+further pass over the whole environment, which is not free — but an index
+exported without them cannot be given them afterwards, and what they answer is
+whether a declaration is still the one a certificate was issued for, a question
+that only arrives later (`with-hashes: 'false'` for an index that will only be
+read).
 
 The remaining inputs, the outputs and the rest of it are documented in [that
 repository's README](https://github.com/chrisflav/trust-action#inputs).  Worth
