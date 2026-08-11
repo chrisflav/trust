@@ -128,6 +128,14 @@ export interface IndexMeta {
   stmtEdgeCount: number
   bodyEdgeCount: number
   hasBodyEdges: boolean
+  /**
+   * Size of `decls.jsonl` in bytes, as the exporter wrote it.
+   *
+   * Optional because indices exported before it was recorded do not have it;
+   * `fetchIndexParts` falls back to the `content-length` header, which is only
+   * the same number when the file is not served compressed.
+   */
+  declBytes?: number
   hasCode?: boolean
   hasHashes?: boolean
   /** Which hasher produced the declaration hashes; certificates must match it. */

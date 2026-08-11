@@ -1,5 +1,12 @@
-import { describe, expect, it } from 'vitest'
-import { StaticIndexSource, closure, closureSize, repoOfModule } from './source'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import {
+  StaticIndexSource,
+  closure,
+  closureSize,
+  fetchIndexParts,
+  repoOfModule,
+  type LoadProgress,
+} from './source'
 import type { Decl } from './types'
 
 const meta = JSON.stringify({
@@ -386,6 +393,181 @@ describe('name lookup and code', () => {
 
   it('has no code when the index carries none', async () => {
     expect(await source.code(0)).toBeNull()
+  })
+})
+
+/**
+ * What the loading bar is told while an index arrives.
+ *
+ * The only thing the page can say for the minute an index takes to download is
+ * how far along it is, and it used to say things that were plainly false —
+ * "76.4 MB of 18.2 MB · 100%" — because the size it divided by came from a
+ * `content-length` header describing the compressed bytes on the wire while the
+ * bytes it counted came out of the decoder.  So these are all about where the
+ * total comes from and what happens when it is not to be had.
+ */
+describe('load progress', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  const stmtEdgeCount = 8
+  const edgeBytes = stmtEdgeCount * 8
+  // `∀` is three bytes of UTF-8 and one JavaScript character, so a table
+  // measured in characters and a table read in bytes disagree here, as they do
+  // in a real index full of `Nat.le_of_lt_succ` and `∀`-quantified statements.
+  const declText = Array.from({ length: 40 }, (_, i) =>
+    decl(i, `Foo.∀${i}`, 'Mathlib.A'),
+  ).join('\n')
+  const declBody = new TextEncoder().encode(declText)
+  const served = { ...JSON.parse(meta), declCount: 40, stmtEdgeCount }
+
+  /** A body that arrives in pieces, as a real download does. */
+  function chunked(bytes: Uint8Array, pieces: number): ReadableStream<Uint8Array> {
+    const size = Math.ceil(bytes.byteLength / pieces)
+    return new ReadableStream({
+      start(controller) {
+        for (let at = 0; at < bytes.byteLength; at += size) {
+          controller.enqueue(bytes.slice(at, at + size))
+        }
+        controller.close()
+      },
+    })
+  }
+
+  /**
+   * Serve one index, with whatever headers the declaration table is to carry.
+   *
+   * The bodies are real streams rather than strings: what is under test is the
+   * running count of decoded bytes, which only exists because the reader is
+   * handed one chunk at a time.
+   */
+  function serve(
+    metaJson: Record<string, unknown>,
+    declHeaders: Record<string, string>,
+    edgesFound = true,
+    table: { bytes: Uint8Array; pieces: number } = { bytes: declBody, pieces: 8 },
+  ): void {
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.endsWith('/meta.json')) return new Response(JSON.stringify(metaJson))
+      if (url.endsWith('/decls.jsonl')) {
+        return new Response(chunked(table.bytes, table.pieces), { headers: declHeaders })
+      }
+      if (url.endsWith('/stmt-edges.bin') && edgesFound) {
+        return new Response(chunked(new Uint8Array(edgeBytes), 2))
+      }
+      return new Response(null, { status: 404 })
+    })
+  }
+
+  async function load(): Promise<LoadProgress[]> {
+    const seen: LoadProgress[] = []
+    const parts = await fetchIndexParts('/index/test', (progress) => seen.push(progress))
+    // The accounting must not have cost the caller any bytes.
+    expect(parts.declText).toBe(declText)
+    // A load with no total reports by the megabyte and these tables are
+    // kilobytes, so only the closing message is guaranteed.
+    expect(seen.length).toBeGreaterThan(0)
+    for (const progress of seen) {
+      if (progress.total > 0) expect(progress.loaded).toBeLessThanOrEqual(progress.total)
+    }
+    return seen
+  }
+
+  it('prefers the size the exporter recorded over the header', async () => {
+    // nginx serves this file gzipped on purpose, so the header is the
+    // compressed size and the only reliable figure is the one written at export
+    // time.  Both are present here, and the recorded one has to win.
+    serve(
+      { ...served, declBytes: declBody.byteLength },
+      { 'content-length': '128', 'content-encoding': 'gzip' },
+    )
+    const seen = await load()
+    expect(seen.some((p) => p.total === declBody.byteLength + edgeBytes)).toBe(true)
+  })
+
+  it('never reports more loaded than total for a compressed table', async () => {
+    // An index exported before `declBytes` existed, served the way the Mathlib
+    // one is: the header is a quarter of what arrives.  `load` checks the
+    // invariant; what this pins is that the wrong number is not used at all.
+    serve(served, {
+      'content-length': String(declBody.byteLength >> 2),
+      'content-encoding': 'gzip',
+    })
+    const seen = await load()
+    for (const progress of seen.slice(0, -1)) expect(progress.total).toBe(0)
+  })
+
+  it('reports an indeterminate total when nothing says how big the table is', async () => {
+    // A chunked response carries no length at all.  There is no honest number
+    // to divide by, and `LoadProgress` documents 0 as "show a bar with no end".
+    serve(served, {})
+    const seen = await load()
+    for (const progress of seen.slice(0, -1)) expect(progress.total).toBe(0)
+  })
+
+  it('still believes the header for an old index served uncompressed', async () => {
+    // Without `Content-Encoding` the header does count the bytes that arrive,
+    // and an index exported before the size was recorded still deserves a real
+    // bar rather than a spinner.
+    serve(served, { 'content-length': String(declBody.byteLength) })
+    const seen = await load()
+    expect(seen.some((p) => p.total === declBody.byteLength + edgeBytes)).toBe(true)
+  })
+
+  it('widens a total the download has already overtaken', async () => {
+    // `meta.json` and `decls.jsonl` are two files, and a half-finished export or
+    // a stale copy of one of them can leave the recorded size short.  The bar
+    // may saturate; it may not run past its own end.
+    serve({ ...served, declBytes: 8 }, {})
+    const seen = await load()
+    expect(seen.at(-1)!.loaded).toBe(declBody.byteLength + edgeBytes)
+    // Asserted before the last message rather than on it: the closing one
+    // reports `total: loaded` whatever happened during the download, so it
+    // would hold even if nothing had widened.
+    expect(seen.at(-2)!.total).toBe(seen.at(-2)!.loaded)
+  })
+
+  it('fills the bar even when an edge file is missing', async () => {
+    // The edge bytes were counted into the total from `meta.json` before the
+    // 404 was known, and a total that nothing will ever fill leaves the bar
+    // parked short of the end until the build phase takes over.
+    serve({ ...served, declBytes: declBody.byteLength }, {}, false)
+    const seen = await load()
+    expect(seen.at(-1)).toEqual({
+      phase: 'fetch',
+      loaded: declBody.byteLength,
+      total: declBody.byteLength,
+    })
+    // Again, before the closing message: the give-back has to have happened
+    // while the table was still arriving, not been papered over at the end.
+    expect(seen.slice(0, -1).some((p) => p.total === declBody.byteLength)).toBe(true)
+  })
+
+  it('does not report every chunk when it has no total to throttle against', async () => {
+    // Reporting is a `postMessage` out of the worker and a React render, and
+    // an index arrives in thousands of chunks.  Having no size to show is
+    // exactly the case that used to skip the throttle: the condition was
+    // `total <= 0 || …`, so an old index — every deployed one — flooded the
+    // main thread for the whole of a 76 MB download.
+    const big = new Uint8Array(4 << 20)
+    serve(served, {}, true, { bytes: big, pieces: 4000 })
+    const seen: LoadProgress[] = []
+    await fetchIndexParts('/index/test', (progress) => seen.push(progress))
+    // Four megabytes, one message per megabyte, plus the closing one.
+    expect(seen.length).toBeLessThanOrEqual(6)
+    for (const progress of seen) expect(progress.total).toBeGreaterThanOrEqual(0)
+  })
+
+  it('fails rather than reading an error page as a declaration table', async () => {
+    // `try_files $uri =404` answers a missing index with nginx's HTML, which
+    // parses as JSONL to nothing at all: without this the page comes up
+    // looking like an index of no declarations instead of saying it is broken.
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.endsWith('/meta.json')) return new Response(JSON.stringify(served))
+      return new Response('<html>404</html>', { status: 404 })
+    })
+    await expect(fetchIndexParts('/index/test')).rejects.toThrow('decls.jsonl')
   })
 })
 

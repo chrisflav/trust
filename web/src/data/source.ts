@@ -707,6 +707,39 @@ async function readBody(response: Response, onChunk: (bytes: number) => void): P
 }
 
 /**
+ * How many bytes reading `response` to the end will yield, or 0 when the
+ * headers do not say.
+ *
+ * `content-length` counts the bytes on the wire, while `readBody` counts the
+ * bytes that come out of the decoder, and those are the same number only for a
+ * response that was not encoded.  `docker/nginx.conf` gzips `decls.jsonl`
+ * deliberately — it is 76 MB of text for Mathlib and compresses to a quarter of
+ * that, which is most of the load time — so the header promised 18 MB while 76
+ * MB arrived, and the caption under the bar read "76.4 MB of 18.2 MB · 100%"
+ * for four fifths of the download.  A chunked response carries no length at
+ * all.  Neither case has a number worth showing, so the caller is told nothing
+ * rather than something false, and the view draws an indeterminate bar.
+ */
+function decodedLength(response: Response): number {
+  // `identity` is the one encoding that encodes nothing — proxies do send it —
+  // so it leaves `content-length` counting exactly what will be read.
+  const encoding = response.headers.get('content-encoding')?.trim().toLowerCase()
+  if (encoding && encoding !== 'identity') return 0
+  const length = Number(response.headers.get('content-length'))
+  return Number.isFinite(length) && length > 0 ? length : 0
+}
+
+/**
+ * How much has to arrive before a load with no known total says so again.
+ *
+ * With a total there is a percent to throttle against; without one there is
+ * nothing to divide by, and reporting every chunk would be a `postMessage` out
+ * of the worker and a React render for each of the thousands a 76 MB download
+ * comes in.  A megabyte is finer than the caption can show anyway.
+ */
+const indeterminateReportBytes = 1 << 20
+
+/**
  * Fetch the raw files an index is made of.
  *
  * Shared by the worker and the inline fallback so that both read exactly the
@@ -727,20 +760,40 @@ export async function fetchIndexParts(
 
   // An edge is exactly eight bytes, so the edge files' sizes are known from
   // `meta.json` before any of them has arrived; only the declaration table has
-  // to be asked for its length.
+  // a length that has to come from somewhere else.  The exporter records it —
+  // it is the only party that knows the file's real size, since by the time the
+  // browser sees it the server may have compressed it — and the header is the
+  // fallback for indices exported before that field existed.
   const declResponse = await fetch(`${base}/decls.jsonl`)
-  const declBytes = Number(declResponse.headers.get('content-length') ?? 0)
+  // A missing edge file is survivable, but a missing declaration table is not:
+  // `try_files $uri =404` answers with an HTML error page, and read as JSONL
+  // that is an index of no declarations rather than a failure anyone can see.
+  if (!declResponse.ok) {
+    throw new Error(`${base}/decls.jsonl: ${declResponse.status} ${declResponse.statusText}`)
+  }
+  const declBytes = meta.declBytes ?? decodedLength(declResponse)
   // Body edges are optional: `trust export` only writes them with --with-bodies.
   const bodyEdgeBytes = meta.hasBodyEdges ? meta.bodyEdgeCount * 8 : 0
-  const total = declBytes + meta.stmtEdgeCount * 8 + bodyEdgeBytes
+  // The declaration table is the bulk of the load, so a total without it is not
+  // an approximation, it is a wrong number; better to admit to knowing nothing.
+  let total = declBytes > 0 ? declBytes + meta.stmtEdgeCount * 8 + bodyEdgeBytes : 0
 
   let loaded = 0
   let reported = 0
   const report = (bytes: number) => {
     loaded += bytes
+    // A total that has already been passed was never the total — a stale
+    // `meta.json` beside a freshly written `decls.jsonl` would do it.  Widening
+    // it keeps the bar monotone and the caption true; clamping `loaded` instead
+    // would print a byte count that was never read.
+    if (total > 0 && loaded > total) total = loaded
     // One message per chunk would be thousands of them; a percent is plenty,
-    // and the view cannot show more resolution than that anyway.
-    if (onProgress && (total <= 0 || loaded - reported >= total / 100)) {
+    // and the view cannot show more resolution than that anyway.  An unknown
+    // total has no percent to throttle against, so it is throttled by bytes
+    // instead — it must not be the case that admitting to not knowing the size
+    // is what floods the main thread.
+    const step = total > 0 ? total / 100 : indeterminateReportBytes
+    if (onProgress && loaded - reported >= step) {
       reported = loaded
       onProgress({ phase: 'fetch', loaded, total })
     }
@@ -749,18 +802,29 @@ export async function fetchIndexParts(
   // Edges arrive as raw int32 pairs and are used as-is.  Parsing them from
   // JSON meant holding tens of megabytes of text and over a million transient
   // line strings, which ran browsers out of memory.
-  const asPairs = async (url: string): Promise<Int32Array> => {
+  const asPairs = async (url: string, expected: number): Promise<Int32Array> => {
     const response = await fetch(url)
-    if (!response.ok) return new Int32Array(0)
+    if (!response.ok) {
+      // An edge file that is not there is survivable, but its bytes were
+      // counted into the total on the strength of `meta.json`, and leaving them
+      // there would park the bar short of the end for the rest of the load.
+      total = Math.max(0, total - expected)
+      return new Int32Array(0)
+    }
     const bytes = await readBody(response, report)
     return new Int32Array(bytes.buffer, bytes.byteOffset, bytes.byteLength >> 2)
   }
   const [declBody, stmtPairs, bodyPairs] = await Promise.all([
     readBody(declResponse, report),
-    asPairs(`${base}/stmt-edges.bin`),
-    meta.hasBodyEdges ? asPairs(`${base}/body-edges.bin`) : Promise.resolve(new Int32Array(0)),
+    asPairs(`${base}/stmt-edges.bin`, meta.stmtEdgeCount * 8),
+    meta.hasBodyEdges
+      ? asPairs(`${base}/body-edges.bin`, bodyEdgeBytes)
+      : Promise.resolve(new Int32Array(0)),
   ])
-  onProgress?.({ phase: 'fetch', loaded, total })
+  // Everything has arrived, so however good the estimate was, the bytes read
+  // are now the whole of what there was to read.  Saying so is what leaves the
+  // bar full instead of stuck a percent short as the build phase takes over.
+  onProgress?.({ phase: 'fetch', loaded, total: loaded })
   return { metaText, declText: new TextDecoder().decode(declBody), stmtPairs, bodyPairs, meta }
 }
 

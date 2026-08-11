@@ -185,9 +185,14 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
   if config.withCode then
     IO.FS.createDirAll (dir / "code")
 
-  let write : StateRefT PropCache IO (Nat × Nat) := do
+  let write : StateRefT PropCache IO (Nat × Nat × Nat) := do
     let mut stmtEdges := 0
     let mut bodyEdges := 0
+    -- Counted as the lines go out rather than by stat-ing the finished file:
+    -- nothing here closes the handle — it is released when it falls out of
+    -- scope, some time after `meta.json` has been written — so a stat could
+    -- read a size that is still missing the last buffered writes.
+    let mut declBytes := 0
     let mut stmtBuf : ByteArray := .empty
     let mut bodyBuf : ByteArray := .empty
     -- Shards are written sequentially: ids ascend, so the shard only ever
@@ -221,7 +226,12 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
           isProp
           isData := !isProp
           hash := (semanticHashes[declName]?).map toHex |>.getD "" }
-      declHandle.putStrLn (Json.compress (toJson node))
+      let line := Json.compress (toJson node)
+      declHandle.putStrLn line
+      -- Bytes, not characters: declaration names are full of `∀`, `≤` and the
+      -- like, each of which is several UTF-8 bytes, and a browser counts what
+      -- comes off the wire.  The `+ 1` is the newline `putStrLn` appends.
+      declBytes := declBytes + line.utf8ByteSize + 1
       for dep in displayableSuccessors env (statementConstants env) declName do
         if let some tgt := ids[dep]? then
           stmtBuf := pushInt32LE (pushInt32LE stmtBuf i) tgt
@@ -243,8 +253,8 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
               bodyBuf := .empty
     stmtHandle.write stmtBuf
     bodyHandle.write bodyBuf
-    return (stmtEdges, bodyEdges)
-  let ((stmtEdges, bodyEdges), _) ← write.run {}
+    return (stmtEdges, bodyEdges, declBytes)
+  let ((stmtEdges, bodyEdges, declBytes), _) ← write.run {}
 
   -- Marks are human judgements about these declarations; the index carries them
   -- so that the frontend can show them without a second source of truth.  Their
@@ -268,6 +278,13 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
     ("declCount", declarations.size),
     ("stmtEdgeCount", stmtEdges),
     ("bodyEdgeCount", bodyEdges),
+    -- The size of `decls.jsonl` as written.  An edge file's size follows from
+    -- its count, so the declaration table was the one part of a load whose
+    -- length the frontend had to ask the server for — and the answer is wrong
+    -- whenever the file is served compressed, which is exactly when the load
+    -- is slow enough for anyone to watch the bar.  This is the last point at
+    -- which the true figure is known for certain.
+    ("declBytes", declBytes),
     ("hasBodyEdges", config.withBodies),
     ("hasCode", config.withCode),
     ("hasHashes", config.withHashes),
