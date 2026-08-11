@@ -113,6 +113,13 @@ inputs:
       Build `trust` from this ref instead of from the copy this action came
       with.  Empty is the sane default and keeps the two in step: the action and
       the exporter it drives are then always the same commit.
+
+      `auto` instead selects the release built for the Lean this repository
+      pins, by reading `working-directory`'s `lean-toolchain` and taking the
+      trust tag of that name — so a library that bumps Lean keeps indexing
+      without also editing its `uses:` line.  What it gives up is the guarantee
+      above: the exporter is then whichever one that Lean maps to, and a new
+      toolchain can bring a new index schema without anyone choosing it.
     required: false
     default: ''
   require-matching-toolchain:
@@ -180,6 +187,10 @@ runs:
         CACHE: ${{ inputs.cache }}
         TRUST_REF: ${{ inputs.trust-ref }}
         ACTION_PATH: ${{ github.action_path }}
+        # The repository `trust-ref` names a ref in, and the one `auto` looks
+        # for release tags in.  A constant rather than an input: the checkout
+        # step below can only fetch this repository anyway.
+        TRUST_REPO: 'https://github.com/chrisflav/trust'
       run: |
         set -euo pipefail
 
@@ -254,11 +265,54 @@ runs:
         fi
         WORKING_DIRECTORY="$(cd "$WORKING_DIRECTORY" && pwd -P)"
 
-        # With no `trust-ref` the sources are the ones GitHub already fetched to
-        # run this action, so the exporter is by construction the one this
-        # action.yml was written against.  A `trust-ref` breaks that link, which
-        # is the whole point of the input, so it goes somewhere else entirely.
-        if [ -n "$TRUST_REF" ]; then
+        # `auto` lets the caller's toolchain choose the exporter.  A trust
+        # release is a release *for* a Lean — the exporter reads `.olean` files,
+        # so there is exactly one trust per toolchain — and each tag is named
+        # after the Lean it indexes.  That makes the caller's `lean-toolchain`
+        # the entire mapping: no table here to fall out of date, and a Lean with
+        # no trust yet is a tag that does not resolve rather than a lookup that
+        # silently returns nothing.
+        CHECKOUT_REF=""
+        if [ "$TRUST_REF" = auto ]; then
+          if [ ! -f "$WORKING_DIRECTORY/lean-toolchain" ]; then
+            echo "::error::no lean-toolchain in '$WORKING_DIRECTORY', so there is no toolchain to select a trust for"
+            exit 1
+          fi
+          TOOLCHAIN="$(tr -d '[:space:]' < "$WORKING_DIRECTORY/lean-toolchain")"
+          # `leanprover/lean4:v4.32.0`, and the tag is what follows the colon.
+          WANT="${TOOLCHAIN##*:}"
+          case "$WANT" in
+            v[0-9]*) ;;
+            *)
+              echo "::error::cannot read a Lean version out of '$TOOLCHAIN'; pass \`trust-ref\` explicitly"
+              exit 1 ;;
+          esac
+          # Resolved to the commit the tag points at rather than checked out by
+          # name: a tag can be moved, and the build cache is keyed on the sources
+          # a run actually got, so a moved tag would otherwise be served an
+          # earlier tag's binary for ever.  `^{}` dereferences the tag object,
+          # which is what an annotated tag needs and a lightweight one ignores.
+          SHA="$(git ls-remote "$TRUST_REPO" "refs/tags/$WANT^{}" | cut -f1)"
+          if [ -z "$SHA" ]; then
+            SHA="$(git ls-remote "$TRUST_REPO" "refs/tags/$WANT" | cut -f1)"
+          fi
+          if [ -z "$SHA" ]; then
+            RELEASED="$(git ls-remote --tags "$TRUST_REPO" \
+              | sed -n 's|.*refs/tags/||p' | grep -v '\^{}$' | sort -V | tr '\n' ' ')"
+            echo "::error::no trust release for Lean $WANT.  Released: ${RELEASED:-none}"
+            exit 1
+          fi
+          echo "trust for Lean $WANT: $SHA" >&2
+          CHECKOUT_REF="$SHA"
+        elif [ -n "$TRUST_REF" ]; then
+          CHECKOUT_REF="$TRUST_REF"
+        fi
+
+        # With no ref to fetch the sources are the ones GitHub already fetched
+        # to run this action, so the exporter is by construction the one this
+        # action.yml was written against.  A ref breaks that link, which is the
+        # whole point of the input, so it goes somewhere else entirely.
+        if [ -n "$CHECKOUT_REF" ]; then
           TRUST_SRC="$GITHUB_WORKSPACE/.trust-source"
           mkdir -p "$TRUST_SRC"
         else
@@ -283,15 +337,16 @@ runs:
           echo "index-path=$OUTPUT_DIR/$INDEX_NAME"
           echo "work-dir=$WORKING_DIRECTORY"
           echo "trust-src=$TRUST_SRC"
+          echo "checkout-ref=$CHECKOUT_REF"
           echo "export-flags=$FLAGS"
         } >> "$GITHUB_OUTPUT"
 
     - name: Check out the requested trust ref
-      if: inputs.trust-ref != ''
+      if: steps.resolve.outputs.checkout-ref != ''
       uses: actions/checkout@v5
       with:
         repository: chrisflav/trust
-        ref: ${{ inputs.trust-ref }}
+        ref: ${{ steps.resolve.outputs.checkout-ref }}
         path: .trust-source
 
     # `.olean` files can only be read by the exact Lean that wrote them, so a
@@ -305,6 +360,11 @@ runs:
     # this clear failure for a compile error deep in someone else's code.  The
     # escape hatch that does exist is for the other case — two files naming the
     # same Lean differently, which elan accepts and a string comparison does not.
+    #
+    # Under `trust-ref: auto` the two agree by construction, since the tag was
+    # chosen from this file.  The check stays anyway: what it then catches is a
+    # release tagged for a Lean it was not built on, which is the one way the
+    # naming convention `auto` relies on can be wrong.
     - name: Check that trust and this library agree on a toolchain
       id: toolchain
       shell: bash

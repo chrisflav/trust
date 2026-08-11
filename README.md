@@ -196,6 +196,30 @@ Pin the ref once you care that the index does not change underneath you: the ref
 you name is the exporter you get, and the exporter decides both the schema and
 the toolchain you are held to.
 
+### Letting the toolchain choose the exporter
+
+Because an exporter can only read the `.olean` files of the Lean it was built
+on, a release of `trust` is a release *for* a toolchain, and its tag is named
+after that Lean: `v4.31.0`, `v4.32.0`.  So the version you need is one you
+already wrote down, in `lean-toolchain`, and `trust-ref: auto` reads it there:
+
+```yaml
+      - uses: chrisflav/trust@v4.32.0
+        with:
+          module: MyLibrary
+          trust-ref: auto
+```
+
+The tag is resolved to the commit it points at, so a moved tag cannot serve a
+stale cached binary, and a Lean with no release yet fails by naming the ones
+that do exist rather than by failing to check something out.
+
+What this buys is that bumping Lean no longer means also editing this file.
+What it costs is the guarantee you get without it: the exporter is then
+whichever one your toolchain maps to, so a Lean bump can bring a new index
+schema without anyone choosing it.  `meta.json` records `schemaVersion` for
+exactly this reason.
+
 > [!WARNING]
 > A `.olean` file can only be read by the exact Lean version that wrote it, so
 > `trust` can only index a library on **its own toolchain** — currently
