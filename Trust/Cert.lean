@@ -1,6 +1,8 @@
 import Lean
 import Trust.Marks
 import Trust.Hash
+import Trust.Time
+import Trust.Pgp
 
 /-!
 # Trust certificates
@@ -244,12 +246,6 @@ instance : FromJson Bundle where
       -- Absent means complete: a sender that truncates has to say so.
       complete := (j.getObjValAs? Bool "complete").toOption.getD true }
 
-/-- The current time as RFC 3339 in UTC, which is how a claim dates itself. -/
-def nowRFC3339 : IO String := do
-  let out ← IO.Process.output { cmd := "date", args := #["-u", "+%Y-%m-%dT%H:%M:%SZ"] }
-  if out.exitCode == 0 then return out.stdout.trimAscii.toString
-  return "1970-01-01T00:00:00Z"
-
 /-- Build a claim for `declName`, hashing it with the semantic hasher. -/
 def issueClaim (env : Environment) (declName : Name) (repo commit note : String) :
     IO (Except String Claim) := do
@@ -268,29 +264,15 @@ def issueClaim (env : Environment) (declName : Name) (repo commit note : String)
       note }
 
 /--
-Sign some bytes by handing them to `gpg`.
+Sign some bytes.
 
-The bytes go in on stdin and the armoured signature comes back on stdout, so
-nothing touching the key is written to disk here and no key material passes
-through this process at all.  `--local-user` picks the key when there is more
-than one.
+The mechanics moved to `Trust.Pgp`; what is left here is the statement of what
+gets signed, which is the part this module is about.  The bytes go to `gpg` on
+stdin and the armoured signature comes back on stdout, so no key material passes
+through this process at all.
 -/
-def signBytes (text : String) (keyId : String) : IO (Except String String) := do
-  let args := #["--armor", "--detach-sign", "--output", "-"]
-    ++ (if keyId.isEmpty then #[] else #["--local-user", keyId])
-  let child ← IO.Process.spawn {
-    cmd := "gpg", args, stdin := .piped, stdout := .piped, stderr := .piped }
-  let (stdin, child) ← child.takeStdin
-  stdin.putStr text
-  stdin.flush
-  -- Closing stdin is what tells gpg the message is complete.
-  let stdout ← IO.asTask child.stdout.readToEnd .dedicated
-  let stderr ← child.stderr.readToEnd
-  let code ← child.wait
-  let signature ← IO.ofExcept stdout.get
-  if code != 0 then
-    return .error s!"gpg failed ({code}): {stderr.trimAscii}"
-  return .ok signature
+def signBytes (text : String) (keyId : String) : IO (Except String String) :=
+  Gpg.sign text keyId
 
 /-- Sign a claim: the canonical bytes, and nothing else. -/
 def signClaim (claim : Claim) (keyId : String) : IO (Except String String) :=
@@ -300,27 +282,9 @@ def signClaim (claim : Claim) (keyId : String) : IO (Except String String) :=
 def signRevocation (revocation : Revocation) (keyId : String) : IO (Except String String) :=
   signBytes revocation.canonical keyId
 
-/--
-Check a signature against the local keyring, without asking any server.
-
-`extraArgs` is how the bundle checker points gpg at a keyring of its own
-instead; empty here, so this uses the keys you already have.
--/
-def verifyBytes (text signature : String) (extraArgs : Array String := #[]) :
-    IO (Except String Unit) := do
-  IO.FS.withTempFile fun sigHandle sigPath => do
-    sigHandle.putStr signature
-    sigHandle.flush
-    let child ← IO.Process.spawn {
-      cmd := "gpg", args := extraArgs ++ #["--verify", sigPath.toString, "-"],
-      stdin := .piped, stdout := .piped, stderr := .piped }
-    let (stdin, child) ← child.takeStdin
-    stdin.putStr text
-    stdin.flush
-    let _ ← child.stdout.readToEnd
-    let stderr ← child.stderr.readToEnd
-    let code ← child.wait
-    if code == 0 then return .ok () else return .error stderr.trimAscii.toString
+/-- Check a signature against the keys you already have, asking no server. -/
+def verifyBytes (text signature : String) : IO (Except String Unit) :=
+  Gpg.verifyLocal text signature
 
 /-- Check a claim's signature locally. -/
 def verifyClaim (claim : Claim) (signature : String) : IO (Except String Unit) :=
@@ -403,73 +367,13 @@ def fetchCertificates (server hash hasher : String) : IO (Except String Bundle) 
     | .ok bundle => return .ok bundle
     | .error msg => return .error s!"unreadable bundle: {msg}"
 
-/--
-A gpg home directory of its own, thrown away afterwards.
-
-Checking a bundle means checking signatures against keys that arrived *with*
-it, and importing strangers' keys into someone's real keyring to do that would
-be a rude and lasting side effect of a read-only command.  Everything happens
-in a directory that exists for the length of one check.
--/
-private def withEphemeralGpgHome (act : String → IO α) : IO α := do
-  let out ← IO.Process.output { cmd := "mktemp", args := #["-d"] }
-  if out.exitCode != 0 then throw <| IO.userError "could not create a temporary directory"
-  let home := out.stdout.trimAscii.toString
-  try
-    act home
-  finally
-    -- Best effort: a leftover temporary directory is untidy, not dangerous.
-    let _ ← IO.Process.output { cmd := "rm", args := #["-rf", home] }
-
-/-- Whether `needle` occurs in `haystack`. -/
-private def containsSubstring (haystack needle : String) : Bool :=
-  (haystack.splitOn needle).length > 1
-
-/--
-The fingerprint of the secret key that will do the signing.
-
-A revocation names the key it withdraws *inside the bytes that get signed*, so
-this has to be the key gpg will actually use — guessing wrong produces a
-perfectly valid signature over a claim about somebody else's key, which every
-node then rejects for a reason that sounds like a bug.
-
-With several secret keys and no `--key`, this refuses rather than picking one:
-gpg's own default depends on `gpg.conf`, and reproducing that guess here is how
-the two quietly disagree.
--/
-def secretFingerprint (keyId : String) : IO (Except String String) := do
-  let selector := if keyId.isEmpty then #[] else #[keyId]
-  let out ← IO.Process.output {
-    cmd := "gpg", args := #["--list-secret-keys", "--with-colons"] ++ selector }
-  if out.exitCode != 0 then
-    return .error s!"gpg could not list your secret keys: {out.stderr.trimAscii}"
-  -- In `--with-colons` output a primary key is a `sec:` record, and the `fpr:`
-  -- record that follows it carries the fingerprint in field ten.
-  let mut fingerprints : Array String := #[]
-  let mut afterSec := false
-  for line in out.stdout.splitOn "\n" do
-    if line.startsWith "sec:" then
-      afterSec := true
-    else if line.startsWith "fpr:" && afterSec then
-      afterSec := false
-      let fields := line.splitOn ":"
-      if h : 9 < fields.length then
-        fingerprints := fingerprints.push (fields[9].toLower)
-  match fingerprints.toList with
-  | [] => return .error "no secret key found; gpg has nothing to sign with"
-  | [only] => return .ok only
-  | _ =>
-    if keyId.isEmpty then
-      return .error "you have several secret keys; say which with --key"
-    else
-      return .ok fingerprints[0]!
+/-- The fingerprint of the secret key that will do the signing. -/
+def secretFingerprint (keyId : String) : IO (Except String String) :=
+  Gpg.secretFingerprint keyId
 
 /-- The armoured public half of a key, to travel with what it signed. -/
-def exportPublicKey (keyId : String) : IO (Except String String) := do
-  let out ← IO.Process.output { cmd := "gpg", args := #["--armor", "--export", keyId] }
-  if out.exitCode != 0 || out.stdout.trimAscii.isEmpty then
-    return .error s!"gpg could not export the public key for `{keyId}`"
-  return .ok out.stdout
+def exportPublicKey (keyId : String) : IO (Except String String) :=
+  Gpg.exportPublicKey keyId
 
 /-- What a bundle check found, per entry. -/
 inductive EntryVerdict where
@@ -496,47 +400,33 @@ are §3.4 of `FEDERATION.md` — the key must be a public key, its fingerprint m
 be the one the entry claims, and the signature must verify over the canonical
 bytes.
 -/
-def verifyBundle (bundle : Bundle) : IO (Array EntryVerdict) := do
-  -- Checked once, up front.  Without it, a missing gpg reports every entry as
-  -- unreadable, which reads as "these certificates are bad" — the most
+def verifyBundle (bundle : Bundle) (verifier : Verifier := defaultVerifier) :
+    IO (Array EntryVerdict) := do
+  -- Checked once, up front.  Without it, a missing verifier reports every entry
+  -- as unreadable, which reads as "these certificates are bad" — the most
   -- misleading answer this command could give, and about the most alarming.
-  let available ← try
-      let out ← IO.Process.output { cmd := "gpg", args := #["--version"] }
-      pure (out.exitCode == 0)
-    catch _ => pure false
-  if !available then
-    throw <| IO.userError "gpg is not available, and checking signatures needs it"
-  withEphemeralGpgHome fun home => do
-    let mut verdicts := #[]
-    for entry in bundle.entries do
-      verdicts := verdicts.push (← verifyEntry home entry)
-    return verdicts
+  if !(← verifier.available) then
+    throw <| IO.userError s!"{verifier.name} is not available, and checking signatures needs it"
+  let mut verdicts := #[]
+  for entry in bundle.entries do
+    verdicts := verdicts.push (← verifyEntry entry)
+  return verdicts
 where
-  /-- Import the entry's key into the throwaway home, then check against it. -/
-  verifyEntry (home : String) (entry : Entry) : IO EntryVerdict := do
+  /-- §3.4, rules 2 to 5, in the order that gives the most useful reason. -/
+  verifyEntry (entry : Entry) : IO EntryVerdict := do
     let decl := entry.claim.decl
     let hash := entry.claim.hash
-    if containsSubstring entry.key "PRIVATE KEY BLOCK" then
-      return .bad decl hash "the entry carries a private key"
-    if !containsSubstring entry.key "BEGIN PGP PUBLIC KEY BLOCK" then
-      return .bad decl hash "the entry carries no public key"
-    let gpgHome := #["--homedir", home, "--batch", "--quiet"]
-    IO.FS.withTempFile fun keyHandle keyPath => do
-      keyHandle.putStr entry.key
-      keyHandle.flush
-      let imported ← IO.Process.output {
-        cmd := "gpg", args := gpgHome ++ #["--import", keyPath.toString] }
-      if imported.exitCode != 0 then
-        return .bad decl hash s!"the key could not be read: {imported.stderr.trimAscii}"
-      -- The fingerprint has to match what the entry claims, or a valid
-      -- signature would be attributed to whoever the entry named.
-      let listed ← IO.Process.output {
-        cmd := "gpg", args := gpgHome ++ #["--with-colons", "--fingerprint"] }
-      let claimed := entry.fingerprint.toLower
-      if !containsSubstring listed.stdout.toLower claimed then
-        return .bad decl hash "the fingerprint does not match the key it travels with"
-      match ← verifyBytes entry.claim.canonical entry.signature gpgHome with
-      | .error reason => return .bad decl hash (reason.replace "\n" "; ")
-      | .ok _ => return .ok decl hash claimed
+    let verdict ← verifier.verify entry.claim.canonical entry.signature entry.key
+    if !verdict.ok then
+      return .bad decl hash verdict.reason
+    -- Rule 3: the fingerprint the entry claims must be the **primary**
+    -- fingerprint of the key it carries.  Comparing against a listing of every
+    -- fingerprint in the bundle, which is what this used to do, accepts a
+    -- subkey's fingerprint as though it were the primary's — and then reports
+    -- the entry as signed by a key nobody can look up under that name.
+    if entry.fingerprint.toLower != verdict.primaryKey then
+      return .bad decl hash
+        s!"the entry claims {entry.fingerprint.toLower}, but the key it travels with is {verdict.primaryKey}"
+    return .ok decl hash verdict.primaryKey
 
 end Trust

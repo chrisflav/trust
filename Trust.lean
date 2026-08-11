@@ -8,4 +8,6 @@ import Trust.Code
 import Trust.Cert
 import Trust.Marks
 import Trust.Hash
+import Trust.Time
+import Trust.Pgp
 import Trust.Cli
