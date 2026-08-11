@@ -44,13 +44,19 @@ jobs:
       - name: Export an index
         run: |
           set -euo pipefail
+          # `Init`, named `core`, with code and bodies: that is the export the
+          # frontend's own tests document, and exporting it here is what lets
+          # them run.  Committing one would be ten megabytes in a repository
+          # that has no other reason to carry any.
           lake env ./.lake/build/bin/trust export \
-            --repo mylib --out "$RUNNER_TEMP/index" --with-hashes Init.Data.Nat.Gcd
-          test -s "$RUNNER_TEMP/index/mylib/meta.json"
-          DECLS="$(grep -c '' "$RUNNER_TEMP/index/mylib/decls.jsonl")"
+            --repo core --out "$RUNNER_TEMP/index" \
+            --with-hashes --with-bodies --with-code Init
+          test -s "$RUNNER_TEMP/index/core/meta.json"
+          DECLS="$(grep -c '' "$RUNNER_TEMP/index/core/decls.jsonl")"
           echo "index holds $DECLS declarations"
           # A handful would mean the environment loaded but nothing was walked.
-          test "$DECLS" -gt 100
+          test "$DECLS" -gt 1000
+          test -s "$RUNNER_TEMP/index/core/code/0.jsonl"
 
       - name: Check the conformance vectors against this implementation
         run: ./.lake/build/bin/trust conformance --check
@@ -117,7 +123,18 @@ jobs:
           set -euo pipefail
           git clone --depth 1 https://github.com/chrisflav/trust-web "$RUNNER_TEMP/trust-web"
           cp -r conformance "$RUNNER_TEMP/trust-web/conformance"
+          # The index its reading tests need.  Without one they skip, which is
+          # the right default in a checkout and the wrong one here.
+          mkdir -p "$RUNNER_TEMP/trust-web/public/index"
+          cp -r "$RUNNER_TEMP/index/core" "$RUNNER_TEMP/trust-web/public/index/core"
           cd "$RUNNER_TEMP/trust-web"
           npm ci
           npm run build
-          npm test
+          npm test 2>&1 | tee /tmp/web-test.log
+          # The reading suites must actually have run: a skip here means the
+          # export above produced something the frontend could not read, which
+          # is exactly the drift this job exists to catch.
+          if grep -q "skipped" /tmp/web-test.log; then
+            echo "::error::the frontend skipped tests -- the exported index was not readable"
+            exit 1
+          fi
