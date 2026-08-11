@@ -6,6 +6,10 @@ node_modules
 /web/public/index
 # Personal working marks; `trust export --marks` points at whichever file you use.
 /trust-marks.json
+# Where the action writes, when it is run against this repository: the index
+# itself, and the second copy of trust that a `trust-ref` asks for.
+/trust-index
+/.trust-source
 
 # Server env: secrets, never committed.
 /docker/.env
