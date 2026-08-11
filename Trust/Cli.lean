@@ -47,14 +47,6 @@ Usage:
   trust marks [options]
   trust conformance [--out <dir>] [--check]
   trust serve-marks [options] [<module>]
-  trust cert issue [options] <module> <declaration>
-  trust cert sign [options] <file>
-  trust cert verify <file>
-  trust cert publish [options] <file>
-  trust cert revoke [options] <file>
-  trust cert fetch [options] <hash>
-  trust cert verify-bundle [options] [<file>]
-  trust cert import [options] [<file>]
   trust hash-invariants <module>
 
 Commands:
@@ -70,7 +62,6 @@ Commands:
   marks         Print the marks file.
   conformance   Write the protocol conformance vectors, or check them.
   serve-marks   Serve the marks file over HTTP, for the frontend's dev server.
-  cert          Issue, sign, verify and publish trust certificates.
 
 Options for deps:
   --depth <n>          Bound expansion depth.  Default: unbounded.
@@ -104,30 +95,12 @@ says — so they live in a version-controlled JSON file rather than in a generat
 index, and each records the commit it was made at.  `check` exits non-zero when
 a protected declaration has changed, so it can gate CI.
 
-Options for cert:
-  --repo <name>        Repository the claim is about.  Default: the directory name.
-  --commit <rev>       Revision the claim is about.  Default: the checked-out one.
-  --note <text>        Why you are vouching for it.
-  -o, --out <file>     Write to this file instead of stdout.
-  --key <id>           Which GPG key to sign with, when you have several.
-  --server <url>       Certificate server.  Default: $TRUST_SERVER.
-  --token <token>      API token.  Default: $TRUST_TOKEN.
-  --hasher <name>      Which hasher a `fetch` is about.
-  --from <url>         Read a bundle from this node instead of from a file.
-
-Signing happens here, by handing the canonical bytes to `gpg` on stdin.  Your
-private key is never read by this program and is never uploaded; the server
-holds public keys only, and verifies rather than being believed.
-
-`revoke` withdraws a certificate everywhere rather than only where it was
-published: the withdrawal is signed by the same key, so any node can check it.
-Only the key that made an assertion can withdraw it, and a later certificate for
-the same content reinstates it.
-
-`verify-bundle` repeats, locally, the check a node claims to have done — each
-signature against the key that travels with it, in a throwaway gpg keyring that
-leaves your own untouched.  `import` does the same and then hands on only what
-checked out.  Together they are why a trust server never has to be believed.
+Certificates:
+  Issuing, signing, publishing and checking certificates is `trust-cert`, from
+  https://github.com/chrisflav/trust-cli.  It applies the same rules this
+  binary does: `Trust.Federation` is in this library, and `trust-cert` calls it,
+  so `trust-cert verify-bundle` repeats precisely the check a node claims to
+  have done.
 
 Module patterns:
   *        Match every module.
@@ -594,191 +567,22 @@ def run (args : List String) : IO UInt32 := do
           pure fun _ => pure none
       serveMarks opts.marksPath (UInt16.ofNat opts.port) hashOf
       return 0
-  | "cert" :: sub :: rest =>
-    match parseMark rest with
-    | .error msg =>
-      IO.eprintln s!"error: {msg}"
-      return 1
-    | .ok (opts, positionals) =>
-      match sub with
-      | "issue" =>
-        if positionals.size != 2 then
-          IO.eprintln "error: expected <module> <declaration>"
-          return 1
-        let (env, declName) ← loadAndResolve positionals[0]! positionals[1]!
-        let repo ← if opts.repo.isEmpty then defaultRepoName else pure opts.repo
-        match ← issueClaim env declName repo opts.commit opts.note with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok claim =>
-          let cert : Certificate := { claim }
-          let text := (toJson cert).pretty ++ "\n"
-          if opts.out.isEmpty then IO.print text else IO.FS.writeFile opts.out text
-          IO.eprintln s!"trust: {claim.decl} hashes to {claim.hash} ({claim.hasher})"
-          return 0
-      | "sign" =>
-        if positionals.size != 1 then
-          IO.eprintln "error: expected <file>"
-          return 1
-        let cert ← readCertificate positionals[0]!
-        match ← signClaim cert.claim opts.key with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok signature =>
-          let signed : Certificate := { cert with signature := some signature }
-          let target := if opts.out.isEmpty then positionals[0]! else opts.out
-          IO.FS.writeFile target ((toJson signed).pretty ++ "\n")
-          IO.eprintln s!"trust: signed {cert.claim.decl}, wrote {target}"
-          return 0
-      | "verify" =>
-        if positionals.size != 1 then
-          IO.eprintln "error: expected <file>"
-          return 1
-        let cert ← readCertificate positionals[0]!
-        match cert.signature with
-        | none =>
-          IO.eprintln "error: this certificate is not signed"
-          return 1
-        | some signature =>
-          match ← verifyClaim cert.claim signature with
-          | .error msg =>
-            IO.eprintln s!"BAD      {cert.claim.decl}\n{msg}"
-            return 1
-          | .ok _ =>
-            IO.eprintln s!"ok       {cert.claim.decl} at {cert.claim.hash}"
-            return 0
-      | "publish" =>
-        if positionals.size != 1 then
-          IO.eprintln "error: expected <file>"
-          return 1
-        let cert ← readCertificate positionals[0]!
-        let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
-        let token ← if opts.token.isEmpty then envOr "TRUST_TOKEN" "" else pure opts.token
-        if server.isEmpty || token.isEmpty then
-          IO.eprintln "error: need --server and --token (or TRUST_SERVER and TRUST_TOKEN)"
-          return 1
-        if cert.signature.isNone then
-          IO.eprintln "trust: publishing unsigned; it will be recorded as `attested` only"
-        match ← publishCertificate cert server token with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok response =>
-          IO.println response
-          return 0
-      | "revoke" =>
-        if positionals.size != 1 then
-          IO.eprintln "error: expected <file>"
-          return 1
-        let cert ← readCertificate positionals[0]!
-        let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
-        match ← secretFingerprint opts.key with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok fingerprint =>
-          let revocation : Revocation := {
-            fingerprint
-            hash := cert.claim.hash
-            hasher := cert.claim.hasher
-            reason := opts.note
-            revoked := ← nowRFC3339 }
-          match ← signRevocation revocation opts.key with
-          | .error msg =>
-            IO.eprintln s!"error: {msg}"
-            return 1
-          | .ok signature =>
-            match ← exportPublicKey fingerprint with
-            | .error msg =>
-              IO.eprintln s!"error: {msg}"
-              return 1
-            | .ok key =>
-              let signed : SignedRevocation := { revocation, signature, key, fingerprint }
-              -- Written out whether or not it is published: a withdrawal you
-              -- cannot re-send is one you have to make again from scratch.
-              if !opts.out.isEmpty then
-                IO.FS.writeFile opts.out ((toJson signed).pretty ++ "\n")
-              if server.isEmpty then
-                if opts.out.isEmpty then IO.println (toJson signed).pretty
-                IO.eprintln s!"trust: signed a withdrawal of {cert.claim.decl}; \
-                  no --server, so nothing was published"
-                return 0
-              match ← publishRevocation revocation signature key server with
-              | .error msg =>
-                IO.eprintln s!"error: {msg}"
-                return 1
-              | .ok response =>
-                IO.println response
-                return 0
-      | "fetch" =>
-        if positionals.size != 1 then
-          IO.eprintln "error: expected <hash>"
-          return 1
-        let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
-        if server.isEmpty then
-          IO.eprintln "error: need --server (or TRUST_SERVER)"
-          return 1
-        match ← fetchCertificates server positionals[0]! opts.hasher with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok bundle =>
-          let text := (toJson bundle).pretty ++ "\n"
-          if opts.out.isEmpty then IO.print text else IO.FS.writeFile opts.out text
-          IO.eprintln s!"trust: {bundle.entries.size} certificates for {positionals[0]!}"
-          return 0
-      | "verify-bundle" =>
-        -- The command that makes a server unnecessary rather than trusted: it
-        -- repeats, here, exactly the check the server says it did.
-        match ← readBundle opts positionals with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok bundle =>
-          let verdicts ← verifyBundle bundle
-          for verdict in verdicts do
-            IO.println verdict.describe
-          let bad := verdicts.filter EntryVerdict.isBad
-          if bad.isEmpty then
-            IO.eprintln s!"trust: {verdicts.size} entries, all signatures good"
-            return 0
-          else
-            IO.eprintln s!"trust: {bad.size} of {verdicts.size} entries did not check out"
-            return 1
-      | "import" =>
-        match ← readBundle opts positionals with
-        | .error msg =>
-          IO.eprintln s!"error: {msg}"
-          return 1
-        | .ok bundle =>
-          -- Checked here before it is sent anywhere.  The receiving node checks
-          -- again — it must, since it did not see this happen — but sending on
-          -- entries you have not looked at makes you the vector.
-          let verdicts ← verifyBundle bundle
-          let bad := verdicts.filter EntryVerdict.isBad
-          for verdict in bad do
-            IO.eprintln verdict.describe
-          if !bad.isEmpty then
-            IO.eprintln s!"error: {bad.size} of {verdicts.size} entries did not check out; \
-              refusing to pass them on"
-            return 1
-          let server ← if opts.server.isEmpty then envOr "TRUST_SERVER" "" else pure opts.server
-          let token ← if opts.token.isEmpty then envOr "TRUST_TOKEN" "" else pure opts.token
-          if server.isEmpty then
-            IO.eprintln s!"trust: {verdicts.size} entries check out; no --server, nothing imported"
-            return 0
-          match ← postJson s!"{server}/api/import" token (Json.compress (toJson bundle)) with
-          | .error msg =>
-            IO.eprintln s!"error: {msg}"
-            return 1
-          | .ok response =>
-            IO.println response
-            return 0
-      | other =>
-        IO.eprintln s!"error: unknown cert subcommand `{other}`"
-        return 1
+  | "cert" :: rest =>
+    -- The certificate workflow moved to chrisflav/trust-cli.  It is a separate
+    -- tool because it is for a person's keys and network rather than for a
+    -- library's CI, and keeping a half-working copy here would only mean two
+    -- implementations of the same commands to keep honest.  The stub stays
+    -- until the next toolchain bump, since a release here is a release for a
+    -- Lean and "one release" is the wrong unit.
+    let sub := rest.headD ""
+    IO.eprintln s!"error: `trust cert {sub}` moved to `trust-cert {sub}`."
+    IO.eprintln "  https://github.com/chrisflav/trust-cli"
+    IO.eprintln ""
+    IO.eprintln "Certificates are issued, signed, published and checked there; this"
+    IO.eprintln "binary is the exporter, and keeps the commands that read a Lean"
+    IO.eprintln "environment.  Both apply the same rules -- `Trust.Federation` is in"
+    IO.eprintln "this library and `trust-cert` calls it."
+    return 1
   | cmd :: _ =>
     IO.eprintln s!"error: unknown command `{cmd}`\n\n{helpText}"
     return 1
