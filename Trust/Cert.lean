@@ -56,7 +56,7 @@ def escapeJsonString (s : String) : String :=
         if c.val == 0x08 then out ++ "\\b"
         else if c.val == 0x0c then out ++ "\\f"
         else
-          let hex := (Nat.toDigits 16 c.val.toNat).asString
+          let hex := String.ofList (Nat.toDigits 16 c.val.toNat)
           out ++ "\\u" ++ "".pushn '0' (4 - hex.length) ++ hex
       else
         out.push c
