@@ -9,6 +9,7 @@ import Trust.Marks
 import Trust.Hash
 import Trust.Cert
 import Trust.Serve
+import Trust.Conformance
 
 /-!
 # Command line interface
@@ -44,6 +45,7 @@ Usage:
   trust check [options] <module>
   trust sync-marks [options] <module>
   trust marks [options]
+  trust conformance [--out <dir>] [--check]
   trust serve-marks [options] [<module>]
   trust cert issue [options] <module> <declaration>
   trust cert sign [options] <file>
@@ -66,6 +68,7 @@ Commands:
   check         Report protected declarations whose content has changed.
   sync-marks    Refresh an existing index's marks.json without re-exporting it.
   marks         Print the marks file.
+  conformance   Write the protocol conformance vectors, or check them.
   serve-marks   Serve the marks file over HTTP, for the frontend's dev server.
   cert          Issue, sign, verify and publish trust certificates.
 
@@ -278,6 +281,8 @@ structure MarkOptions where
   from? : String := ""
   /-- Port for `serve-marks`. -/
   port : Nat := 8123
+  /-- Check the conformance vectors rather than writing them. -/
+  check : Bool := false
 
 /-- Parse the options shared by `trusted`, `protect`, `characterize` and `check`. -/
 def parseMark (args : List String) : Except String (MarkOptions × Array String) :=
@@ -289,6 +294,7 @@ where
     match args with
     | [] => .ok (opts, positionals)
     | "--remove" :: rest => go rest { opts with remove := true } positionals
+    | "--check" :: rest => go rest { opts with check := true } positionals
     | arg :: value :: rest =>
       if arg == "--marks" then go rest { opts with marksPath := value } positionals
       else if arg == "--note" then go rest { opts with note := value } positionals
@@ -547,6 +553,23 @@ def run (args : List String) : IO UInt32 := do
       let marks ← Marks.load opts.marksPath
       IO.println (toJson marks).pretty
       return 0
+  | "conformance" :: rest =>
+    match parseMark rest with
+    | .error msg =>
+      IO.eprintln s!"error: {msg}"
+      return 1
+    | .ok (opts, _) =>
+      let dir : System.FilePath := if opts.out.isEmpty then "conformance" else opts.out
+      if opts.check then
+        let problems ← Conformance.check dir
+        for problem in problems do IO.eprintln s!"conformance: {problem}"
+        if problems.any (!·.startsWith "SKIPPED") then return 1 else
+          IO.println s!"conformance: {dir} agrees with this implementation"
+          return 0
+      else
+        Conformance.write dir
+        IO.println s!"conformance: wrote vectors to {dir}"
+        return 0
   | "serve-marks" :: rest =>
     match parseMark rest with
     | .error msg =>

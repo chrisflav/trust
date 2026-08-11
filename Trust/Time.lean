@@ -54,7 +54,7 @@ private def splitFraction (s : String) : String × Nat := Id.run do
       let head := cs.takeWhile (· != '.')
       let padded := digits.take 3 ++ List.replicate (3 - min 3 digits.length) '0'
       let millis := padded.foldl (fun acc c => acc * 10 + (c.val - '0'.val).toNat) 0
-      (String.mk (head ++ tail), millis)
+      (String.ofList (head ++ tail), millis)
 
 /--
 Read a timestamp that someone else wrote.

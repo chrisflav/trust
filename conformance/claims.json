@@ -1,0 +1,49 @@
+[{"name": "awkward-characters",
+  "claim":
+  {"toolchain": "4.31.0",
+   "repo": "trust",
+   "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+   "hasher": "semantic-v1",
+   "hash": "629db3ae6e206484",
+   "decl": "Nat.gcd",
+   "commit": "0a5a0e6",
+   "asserted": "2026-07-18T16:14:12Z"},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "note-forging-a-field",
+  "claim":
+  {"toolchain": "4.31.0",
+   "repo": "trust",
+   "note": "\",\"hash\":\"0000000000000000",
+   "hasher": "semantic-v1",
+   "hash": "629db3ae6e206484",
+   "decl": "Nat.gcd",
+   "commit": "0a5a0e6",
+   "asserted": "2026-07-18T16:14:12Z"},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"\\\",\\\"hash\\\":\\\"0000000000000000\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "c0-controls",
+  "claim":
+  {"toolchain": "4.31.0",
+   "repo": "trust",
+   "note":
+   "tab:\u0009newline:\nreturn:\rbackspace:\u0008formfeed:\u000cbell:\u0007",
+   "hasher": "semantic-v1",
+   "hash": "629db3ae6e206484",
+   "decl": "Nat.gcd",
+   "commit": "0a5a0e6",
+   "asserted": "2026-07-18T16:14:12Z"},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"tab:\\tnewline:\\nreturn:\\rbackspace:\\bformfeed:\\fbell:\\u0007\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "empty-note",
+  "claim":
+  {"toolchain": "4.31.0",
+   "repo": "trust",
+   "note": "",
+   "hasher": "semantic-v1",
+   "hash": "629db3ae6e206484",
+   "decl": "Nat.gcd",
+   "commit": "0a5a0e6",
+   "asserted": "2026-07-18T16:14:12Z"},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"}]

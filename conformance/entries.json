@@ -1,0 +1,170 @@
+[{"name": "well-formed",
+  "expect": {"accept": true},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "fingerprint-is-the-subkey",
+  "expect": {"rule": "3.4/3", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "4cfe1509aba95f9e7a24fcc8f6111065d87f874a",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "fingerprint-is-a-stranger",
+  "expect": {"rule": "3.4/3", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "0000000000000000000000000000000000000000",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "signature-over-other-bytes",
+  "expect": {"rule": "3.4/4", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "tampered",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"tampered\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "carries-a-private-key",
+  "expect": {"rule": "3.4/2", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PRIVATE KEY BLOCK-----\nx\n-----END PGP PRIVATE KEY BLOCK-----",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "no-key-at-all",
+  "expect": {"rule": "3.4/2", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key": "not a key",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "hash-is-not-lower-case-hex",
+  "expect": {"rule": "3.4/1", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629DB3AE6E206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629DB3AE6E206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "hash-is-too-short",
+  "expect": {"rule": "3.4/1", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "2026-07-18T16:14:12Z"}},
+  "canonical":
+  "{\"asserted\":\"2026-07-18T16:14:12Z\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"},
+ {"name": "asserted-is-not-a-timestamp",
+  "expect": {"rule": "3.4/1", "accept": false},
+  "entry":
+  {"signature":
+   "-----BEGIN PGP SIGNATURE-----\n\niI4EABYKADYWIQRM/hUJq6lfnnok/Mj2ERBl2H+HSgUCantn5hgcY29uZm9ybWFu\nY2VAZXhhbXBsZS5vcmcACgkQ9hEQZdh/h0o21AD8CqbB9P7Ehb2g8twI0Gw+OZS7\nfbQtbYu/zIfi6rIHdQwBANSGS9ziZHUb9auXb1AAJJdjXPmnUel9If9Mv2pzZWEH\n=Mg1r\n-----END PGP SIGNATURE-----\n",
+   "key":
+   "-----BEGIN PGP PUBLIC KEY BLOCK-----\n\nmDMEantn5hYJKwYBBAHaRw8BAQdAhne8516/yczC3NcRrDBnI6Bwt+W7vYUPXm4Q\ngEQrasa0KUNvbmZvcm1hbmNlIEtleSA8Y29uZm9ybWFuY2VAZXhhbXBsZS5vcmc+\niJAEExYKADgWIQRQ/IiyOvR0nKTa5+oUaKra0Cd7swUCantn5gIbAwULCQgHAgYV\nCgkICwIEFgIDAQIeAQIXgAAKCRAUaKra0Cd7s89tAP9mFYVojaZeYNEvoxIYD5OV\njZyHbm9Wye6Rmq45gZCVIQEA+mqoJ8fIfLZ+CYtRWTp94HG5YsUwh1fG7Elm1ltX\nsga4MwRqe2fmFgkrBgEEAdpHDwEBB0DciaU0oN5hsGINNelbJJnynaCDSpCfYsLi\naw0NFUU9c4jvBBgWCgAgFiEEUPyIsjr0dJyk2ufqFGiq2tAne7MFAmp7Z+YCGwIA\ngQkQFGiq2tAne7N2IAQZFgoAHRYhBEz+FQmrqV+eeiT8yPYREGXYf4dKBQJqe2fm\nAAoJEPYREGXYf4dKR4ABAKd6MWATB/0b50DmyQy0CPuYhqfSZywKwXCRN4806RAj\nAQDKVH5uw39F9aB3tADqQn1L4sZ2FCH7hMcIpgeP17XLC1acAQD4XTdyA+VThHZd\nUjnpDPozaVg27ltFMRKaq8YdKoUptAEAiBBGp/VbffRpvjhBT0z7ogGcjBToWRf5\n7CcCsYzrDw4=\n=lOmq\n-----END PGP PUBLIC KEY BLOCK-----\n",
+   "fingerprint": "50fc88b23af4749ca4dae7ea1468aadad0277bb3",
+   "claim":
+   {"toolchain": "4.31.0",
+    "repo": "trust",
+    "note": "reviewed by hand: \"quotes\", \\backslash, and ünïcodé",
+    "hasher": "semantic-v1",
+    "hash": "629db3ae6e206484",
+    "decl": "Nat.gcd",
+    "commit": "0a5a0e6",
+    "asserted": "yesterday"}},
+  "canonical":
+  "{\"asserted\":\"yesterday\",\"commit\":\"0a5a0e6\",\"decl\":\"Nat.gcd\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"note\":\"reviewed by hand: \\\"quotes\\\", \\\\backslash, and ünïcodé\",\"repo\":\"trust\",\"toolchain\":\"4.31.0\"}"}]

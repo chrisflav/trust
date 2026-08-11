@@ -1,0 +1,18 @@
+[{"revocation":
+  {"revoked": "2026-07-18T16:14:12Z",
+   "reason": "the proof was wrong",
+   "hasher": "semantic-v1",
+   "hash": "629db3ae6e206484",
+   "fingerprint": "3acde6becb49b9dd602fc41ed3b69ff50b2226c8"},
+  "name": "with-reason",
+  "canonical":
+  "{\"fingerprint\":\"3acde6becb49b9dd602fc41ed3b69ff50b2226c8\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"reason\":\"the proof was wrong\",\"revoked\":\"2026-07-18T16:14:12Z\"}"},
+ {"revocation":
+  {"revoked": "2026-07-18T16:14:12Z",
+   "reason": "",
+   "hasher": "semantic-v1",
+   "hash": "629db3ae6e206484",
+   "fingerprint": "3acde6becb49b9dd602fc41ed3b69ff50b2226c8"},
+  "name": "empty-reason",
+  "canonical":
+  "{\"fingerprint\":\"3acde6becb49b9dd602fc41ed3b69ff50b2226c8\",\"hash\":\"629db3ae6e206484\",\"hasher\":\"semantic-v1\",\"reason\":\"\",\"revoked\":\"2026-07-18T16:14:12Z\"}"}]
