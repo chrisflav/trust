@@ -721,10 +721,23 @@ async function readBody(response: Response, onChunk: (bytes: number) => void): P
  * rather than something false, and the view draws an indeterminate bar.
  */
 function decodedLength(response: Response): number {
-  if (response.headers.get('content-encoding')) return 0
+  // `identity` is the one encoding that encodes nothing — proxies do send it —
+  // so it leaves `content-length` counting exactly what will be read.
+  const encoding = response.headers.get('content-encoding')?.trim().toLowerCase()
+  if (encoding && encoding !== 'identity') return 0
   const length = Number(response.headers.get('content-length'))
   return Number.isFinite(length) && length > 0 ? length : 0
 }
+
+/**
+ * How much has to arrive before a load with no known total says so again.
+ *
+ * With a total there is a percent to throttle against; without one there is
+ * nothing to divide by, and reporting every chunk would be a `postMessage` out
+ * of the worker and a React render for each of the thousands a 76 MB download
+ * comes in.  A megabyte is finer than the caption can show anyway.
+ */
+const indeterminateReportBytes = 1 << 20
 
 /**
  * Fetch the raw files an index is made of.
@@ -752,6 +765,12 @@ export async function fetchIndexParts(
   // browser sees it the server may have compressed it — and the header is the
   // fallback for indices exported before that field existed.
   const declResponse = await fetch(`${base}/decls.jsonl`)
+  // A missing edge file is survivable, but a missing declaration table is not:
+  // `try_files $uri =404` answers with an HTML error page, and read as JSONL
+  // that is an index of no declarations rather than a failure anyone can see.
+  if (!declResponse.ok) {
+    throw new Error(`${base}/decls.jsonl: ${declResponse.status} ${declResponse.statusText}`)
+  }
   const declBytes = meta.declBytes ?? decodedLength(declResponse)
   // Body edges are optional: `trust export` only writes them with --with-bodies.
   const bodyEdgeBytes = meta.hasBodyEdges ? meta.bodyEdgeCount * 8 : 0
@@ -769,8 +788,12 @@ export async function fetchIndexParts(
     // would print a byte count that was never read.
     if (total > 0 && loaded > total) total = loaded
     // One message per chunk would be thousands of them; a percent is plenty,
-    // and the view cannot show more resolution than that anyway.
-    if (onProgress && (total <= 0 || loaded - reported >= total / 100)) {
+    // and the view cannot show more resolution than that anyway.  An unknown
+    // total has no percent to throttle against, so it is throttled by bytes
+    // instead — it must not be the case that admitting to not knowing the size
+    // is what floods the main thread.
+    const step = total > 0 ? total / 100 : indeterminateReportBytes
+    if (onProgress && loaded - reported >= step) {
       reported = loaded
       onProgress({ phase: 'fetch', loaded, total })
     }

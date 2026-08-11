@@ -446,11 +446,12 @@ describe('load progress', () => {
     metaJson: Record<string, unknown>,
     declHeaders: Record<string, string>,
     edgesFound = true,
+    table: { bytes: Uint8Array; pieces: number } = { bytes: declBody, pieces: 8 },
   ): void {
     vi.stubGlobal('fetch', async (url: string) => {
       if (url.endsWith('/meta.json')) return new Response(JSON.stringify(metaJson))
       if (url.endsWith('/decls.jsonl')) {
-        return new Response(chunked(declBody, 8), { headers: declHeaders })
+        return new Response(chunked(table.bytes, table.pieces), { headers: declHeaders })
       }
       if (url.endsWith('/stmt-edges.bin') && edgesFound) {
         return new Response(chunked(new Uint8Array(edgeBytes), 2))
@@ -464,7 +465,9 @@ describe('load progress', () => {
     const parts = await fetchIndexParts('/index/test', (progress) => seen.push(progress))
     // The accounting must not have cost the caller any bytes.
     expect(parts.declText).toBe(declText)
-    expect(seen.length).toBeGreaterThan(1)
+    // A load with no total reports by the megabyte and these tables are
+    // kilobytes, so only the closing message is guaranteed.
+    expect(seen.length).toBeGreaterThan(0)
     for (const progress of seen) {
       if (progress.total > 0) expect(progress.loaded).toBeLessThanOrEqual(progress.total)
     }
@@ -519,6 +522,10 @@ describe('load progress', () => {
     serve({ ...served, declBytes: 8 }, {})
     const seen = await load()
     expect(seen.at(-1)!.loaded).toBe(declBody.byteLength + edgeBytes)
+    // Asserted before the last message rather than on it: the closing one
+    // reports `total: loaded` whatever happened during the download, so it
+    // would hold even if nothing had widened.
+    expect(seen.at(-2)!.total).toBe(seen.at(-2)!.loaded)
   })
 
   it('fills the bar even when an edge file is missing', async () => {
@@ -532,6 +539,35 @@ describe('load progress', () => {
       loaded: declBody.byteLength,
       total: declBody.byteLength,
     })
+    // Again, before the closing message: the give-back has to have happened
+    // while the table was still arriving, not been papered over at the end.
+    expect(seen.slice(0, -1).some((p) => p.total === declBody.byteLength)).toBe(true)
+  })
+
+  it('does not report every chunk when it has no total to throttle against', async () => {
+    // Reporting is a `postMessage` out of the worker and a React render, and
+    // an index arrives in thousands of chunks.  Having no size to show is
+    // exactly the case that used to skip the throttle: the condition was
+    // `total <= 0 || …`, so an old index — every deployed one — flooded the
+    // main thread for the whole of a 76 MB download.
+    const big = new Uint8Array(4 << 20)
+    serve(served, {}, true, { bytes: big, pieces: 4000 })
+    const seen: LoadProgress[] = []
+    await fetchIndexParts('/index/test', (progress) => seen.push(progress))
+    // Four megabytes, one message per megabyte, plus the closing one.
+    expect(seen.length).toBeLessThanOrEqual(6)
+    for (const progress of seen) expect(progress.total).toBeGreaterThanOrEqual(0)
+  })
+
+  it('fails rather than reading an error page as a declaration table', async () => {
+    // `try_files $uri =404` answers a missing index with nginx's HTML, which
+    // parses as JSONL to nothing at all: without this the page comes up
+    // looking like an index of no declarations instead of saying it is broken.
+    vi.stubGlobal('fetch', async (url: string) => {
+      if (url.endsWith('/meta.json')) return new Response(JSON.stringify(served))
+      return new Response('<html>404</html>', { status: 404 })
+    })
+    await expect(fetchIndexParts('/index/test')).rejects.toThrow('decls.jsonl')
   })
 })
 
