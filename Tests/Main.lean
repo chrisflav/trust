@@ -54,7 +54,16 @@ def timeTests : Suite := do
     check "later wins" (laterThan "2026-07-18T16:14:13Z" "2026-07-18T16:14:12Z"),
     check "a tie is not later" (!laterThan "2026-07-18T16:14:12Z" "2026-07-18T16:14:12Z"),
     check "an unparseable comparison never suppresses"
-      (!notLaterThan "whenever" "2026-07-18T16:14:12Z")]
+      (!notLaterThan "whenever" "2026-07-18T16:14:12Z"),
+    -- Another implementation may write a fraction; we never do, but rule 1 asks
+    -- only that it parse.
+    check "a fractional second parses" (isRFC3339 "2026-07-18T16:14:12.500Z"),
+    check "a fraction orders within the second"
+      (laterThan "2026-07-18T16:14:12.500Z" "2026-07-18T16:14:12.250Z"),
+    check "a fraction is not later than the next second"
+      (notLaterThan "2026-07-18T16:14:12.500Z" "2026-07-18T16:14:13Z"),
+    check "a bare second is not later than its own fraction"
+      (notLaterThan "2026-07-18T16:14:12Z" "2026-07-18T16:14:12.500Z")]
 
 /-! ## Canonical bytes
 
