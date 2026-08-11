@@ -72,10 +72,11 @@ things the TypeScript arrangement could not have.
 1. **`verify-bundle` becomes the check it claims to be.**  `README.md` says it
    "repeats, locally, precisely the check the server claims to have done".  Today
    that is approximately true: the server applies all five acceptance rules of
-   §3.4, and Lean's `verifyBundle` applies three — it never checks that the
-   signing subkey belongs to the key bundle, which the protocol calls the rule
-   most easily got wrong.  In Lean, the CLI and the server call the same
-   function, and the sentence becomes literally true.
+   §3.4, and Lean's `verifyBundle` applies them approximately — it checks the
+   fingerprint an entry claims against a listing that includes *subkey*
+   fingerprints, so an entry naming a subkey passes a check §3.4 rule 3 means to
+   fail.  In Lean, the CLI and the server call the same function, and the
+   sentence becomes literally true.
 2. **One canonicalization, one acceptance implementation.**  Core, CLI and
    server share `Trust.Cert` and `Trust.Federation`; the browser is the second
    implementation, bound to the first by conformance vectors.  Two
@@ -453,3 +454,54 @@ Ecosystem claims above were checked rather than recalled.
   pure Lean; no SHA-2, no OpenPGP
 * [Reservoir](https://reservoir.lean-lang.org/) — no Postgres driver, no TLS
   package found
+
+## Appendix: what the implementation changed about this plan
+
+Written after the fact.  A plan that is not corrected by contact with the thing
+it planned is a plan nobody followed.
+
+**Phase 0 answered its three questions, and one of them differently.**
+`Std.Http` serves real requests over a real socket — a handler is about ten
+lines, and `Std.Http.Server.Config` covers most of §8 as configuration.  `gpg
+--status-fd` reports `VALIDSIG <signing-key> … <primary-key>`, so rules 3 and 5
+are both checkable, and the per-verification cost is a process spawn the
+workload can afford.  The store spike went the other way.
+
+**The store is an append-only log, not SQLite.**  `leansqlite` needs a C
+compiler and pins `v4.34.0-rc1`; adopting it would have forced a toolchain bump
+on core, and therefore on the pinned `semantic_hash` revision that every
+certificate hash depends on.  A log of JSONL with an in-memory index costs about
+850 lines, needs no C, and fits §4.3's cursor exactly — the cursor *is*
+`(updatedAt, seq)`.  So the toolchain never moved: everything is still on
+v4.32.0, and the "bump to ≥ 4.34" chore above is void.
+
+One real cost, stated plainly: **v4.32.0 exposes no `fsync`**.  A write is
+`putStr`, `flush`, and then `sync --data` as a subprocess when durability is
+switched on.  A C shim would fix it and would reintroduce the dependency the log
+was chosen to avoid.
+
+**The npm package was never needed.**  With the server and the CLI in Lean there
+is no second TypeScript consumer, so `conformance/` is the whole contract, and
+the frontend's CI fetches it rather than depending on a package.  Decision 3
+above dissolved rather than being decided.
+
+**Dependency revisions are not on `main`.**  `lean4-cli` builds from its
+`v4.32.0` tag; `main` is on v4.34.0-rc1.  `LSpec` builds at `3e23a4ad`, the last
+revision before its Plausible integration, which does not compile here.  Both
+are pinned with a comment saying why, because a future reader will otherwise
+"helpfully" move them to `main`.
+
+**The bug in §3.4 was rule 3, not rule 5.**  The old check imported the entry's
+key into an empty keyring and then looked for the claimed fingerprint anywhere
+in `gpg --with-colons --fingerprint`, which lists subkeys too.  Isolation was
+already enforcing rule 5 as a side effect; what leaked through was an entry
+naming a *subkey's* fingerprint, which rule 3 requires to be the primary's.  It
+is fixed, it has a test, and it is a vector in `conformance/entries.json` so
+that the next implementation cannot repeat it.
+
+**Timestamps had to become more liberal, not less.**  Reviewing the node's store
+turned up a second RFC 3339 parser, written because core's could not read a
+fractional second.  §3.4 rule 1 asks only that `asserted` parse, so the fix
+belonged in core: fractions are accepted and kept to milliseconds, and the
+comparisons order by them.  What is *written* is unchanged — seconds, and a
+literal `Z`.
