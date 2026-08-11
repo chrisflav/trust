@@ -87,13 +87,13 @@ CHANGED  Nat.gcd: 4e36146e78af9850 at 5f6b07a → 91c0a2ff31bd7e04 now
 MISSING  Nat.foo: protected but not present in this environment
 ```
 
-Hashing goes through a `Hasher` (`Trust/Hash.lean`).  The intended
-implementation is [semantic_hash](https://github.com/mathlib-initiative/semantic_hash),
-which is stable under changes that do not change meaning; it currently builds
-against Lean v4.30.0 while `trust` is on v4.31.0, so the default for now is a
-structural hash that never misses a real change but does report renamed binders
-as changes.  Every snapshot records which hasher produced it, and hashes from
-different hashers are reported as incomparable rather than silently diffed.
+Hashing goes through a `Hasher` (`Trust/Hash.lean`).  The default is
+[semantic_hash](https://github.com/mathlib-initiative/semantic_hash), which is
+stable under changes that do not change meaning; the alternative the record
+exists for is a structural hash, which never misses a real change but does
+report renamed binders as changes.  Every snapshot records which hasher
+produced it, and hashes from different hashers are reported as incomparable
+rather than silently diffed.
 
 `trust export` carries the marks into the index as `marks.json`, resolving each
 protected declaration's status on the way — deciding whether content still
@@ -199,7 +199,7 @@ the toolchain you are held to.
 > [!WARNING]
 > A `.olean` file can only be read by the exact Lean version that wrote it, so
 > `trust` can only index a library on **its own toolchain** — currently
-> `leanprover/lean4:v4.31.0`.  The action compares the two `lean-toolchain`
+> `leanprover/lean4:v4.32.0`.  The action compares the two `lean-toolchain`
 > files and stops there, naming both versions, rather than letting it fail
 > somewhere inside Lean with a message about a module header.
 >

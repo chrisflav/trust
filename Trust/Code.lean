@@ -119,8 +119,8 @@ private partial def flatten (infos : InfoPerPos) (tt : TaggedText (Nat × Nat)) 
         -- The delaborator pads notation tokens with the surrounding whitespace,
         -- so `Ne` arrives as " ≠ ".  Clicking should not extend into the gaps.
         let produced := (after.text.drop before.text.length).toString
-        let start := before.offset + (utf16Length produced - utf16Length produced.trimLeft)
-        let stop := after.offset - (utf16Length produced - utf16Length produced.trimRight)
+        let start := before.offset + (utf16Length produced - utf16Length produced.trimAsciiStart.copy)
+        let stop := after.offset - (utf16Length produced - utf16Length produced.trimAsciiEnd.copy)
         if stop > start then
           modify fun st =>
             { st with refs := st.refs.push { start, stop, name := s!"{privateToUserName declName}" } }

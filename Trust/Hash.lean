@@ -14,15 +14,16 @@ The fingerprint we actually want is a *semantic* hash — one that is stable und
 changes that do not change meaning, such as renaming a binder or reordering
 independent hypotheses.  That is what
 [semantic_hash](https://github.com/mathlib-initiative/semantic_hash) computes,
-and it is the intended implementation.  It currently builds against Lean
-v4.30.0 while `trust` is on v4.31.0, so it cannot be depended on yet.
+and it is what `defaultHasher` uses.  `lakefile.toml` pins it to the tag built
+against this repository's toolchain rather than to a branch: a recorded hash is
+only worth recording if the version that produced it can be named and re-run.
 
-So hashing goes through a `Hasher` record rather than being called directly, and
-the default is a structural hash.  Swapping in `semantic_hash` later means
-adding one `Hasher` and changing the default; nothing else in the codebase
-learns about it.  Every recorded snapshot carries the name of the hasher that
-produced it, because hashes from different hashers are not comparable and
-silently comparing them would report changes that never happened.
+Hashing still goes through a `Hasher` record rather than being called directly,
+so the structural hash below stays available and a third could be added without
+the rest of the codebase learning about it.  Every recorded snapshot carries the
+name of the hasher that produced it, because hashes from different hashers are
+not comparable and silently comparing them would report changes that never
+happened.
 -/
 
 namespace Trust
