@@ -34,19 +34,57 @@ def nowRFC3339 : IO String := do
   return rfc3339Format.format (DateTime.ofTimestampWithZone now .UTC)
 
 /--
+Split off a fractional-seconds part, keeping it as milliseconds.
+
+`Std.Time`'s formats are second-precision, and RFC 3339 permits a fraction.  We
+never write one, but §3.4 rule 1 asks only that `asserted` *parses*, and a node
+that rejected `2026-07-18T16:14:12.5Z` would be refusing entries another
+implementation is entitled to send.  Further digits are dropped rather than
+rounded, so that ordering never depends on how many a signer happened to write.
+-/
+private def splitFraction (s : String) : String × Nat := Id.run do
+  let cs := s.toList
+  match cs.dropWhile (· != '.') with
+  | [] => (s, 0)
+  | _ :: rest =>
+    let digits := rest.takeWhile Char.isDigit
+    if digits.isEmpty then (s, 0)
+    else
+      let tail := rest.dropWhile Char.isDigit
+      let head := cs.takeWhile (· != '.')
+      let padded := digits.take 3 ++ List.replicate (3 - min 3 digits.length) '0'
+      let millis := padded.foldl (fun acc c => acc * 10 + (c.val - '0'.val).toNat) 0
+      (String.mk (head ++ tail), millis)
+
+/--
 Read a timestamp that someone else wrote.
 
-Both spellings are accepted — `Z` and a numeric offset — because §3.4 asks only
-that `asserted` be parseable, and a node that refused `+00:00` would be
-rejecting entries a conforming implementation is entitled to send.
+Both spellings of the zone are accepted — `Z` and a numeric offset — and so is a
+fractional second, because §3.4 asks only that `asserted` be parseable and a
+node that refused `+00:00` would be rejecting entries a conforming
+implementation is entitled to send.
 -/
 def parseRFC3339? (s : String) : Option Timestamp :=
+  let (s, _) := splitFraction s
   match rfc3339Format.parse s with
   | .ok dt => some dt.toTimestamp
   | .error _ =>
     match Formats.iso8601.parse s with
     | .ok dt => some dt.toTimestamp
     | .error _ => none
+
+/--
+An instant as epoch milliseconds, which is what the comparisons order by.
+
+The fraction is kept here rather than thrown away with it: two certificates
+asserted in the same second by an implementation that writes milliseconds are
+genuinely ordered, and §3.5 decides which of them wins.
+-/
+def epochMillis? (s : String) : Option Int :=
+  let (stripped, millis) := splitFraction s
+  match parseRFC3339? stripped with
+  | some ts => some (ts.toMillisecondsSinceUnixEpoch.val + millis)
+  | none => none
 
 /-- Whether `s` is a timestamp at all, which is §3.4 rule 1's last clause. -/
 def isRFC3339 (s : String) : Bool := (parseRFC3339? s).isSome
@@ -63,14 +101,14 @@ Unparseable inputs answer `false`: a comparison that cannot be made must not
 silently become a suppression.
 -/
 def notLaterThan (a b : String) : Bool :=
-  match parseRFC3339? a, parseRFC3339? b with
-  | some ta, some tb => ta.toNanosecondsSinceUnixEpoch ≤ tb.toNanosecondsSinceUnixEpoch
+  match epochMillis? a, epochMillis? b with
+  | some ta, some tb => ta ≤ tb
   | _, _ => false
 
 /-- Strictly later, for §3.5's "the entry with the later `asserted` wins". -/
 def laterThan (a b : String) : Bool :=
-  match parseRFC3339? a, parseRFC3339? b with
-  | some ta, some tb => tb.toNanosecondsSinceUnixEpoch < ta.toNanosecondsSinceUnixEpoch
+  match epochMillis? a, epochMillis? b with
+  | some ta, some tb => tb < ta
   | _, _ => false
 
 /-- Epoch milliseconds, which is the first half of a §4.3 cursor. -/
