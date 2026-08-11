@@ -95,3 +95,55 @@ jobs:
           # into the `<root>/<name>/meta.json` shape the frontend reads.
           path: ${{ steps.index.outputs.index-root }}
           retention-days: 7
+
+  # `trust-ref: auto` reads this repository's `lean-toolchain` and fetches the
+  # release tagged for that Lean, so what runs here is the pull request's
+  # action.yml driving the *released* exporter rather than the one beside it.
+  # That is the combination every caller of `auto` gets, and the only way to
+  # find out that the tag it names has gone missing is to ask for it.
+  auto:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: index
+        uses: ./
+        with:
+          module: Init.Data.Nat.Gcd
+          index-name: core-gcd-auto
+          trust-ref: auto
+          # Nothing here reads the source, and the point is the resolution
+          # rather than the export, so skip the largest part of the work.
+          with-code: 'false'
+          rev: ${{ github.event.pull_request.head.sha }}
+
+      - name: Check that auto resolved to this toolchain's release
+        shell: bash
+        env:
+          INDEX_PATH: ${{ steps.index.outputs.index-path }}
+          DECL_COUNT: ${{ steps.index.outputs.decl-count }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -s "$INDEX_PATH/meta.json" ]; then
+            echo "::error::$INDEX_PATH/meta.json is missing or empty"
+            exit 1
+          fi
+          if [ "${DECL_COUNT:-0}" -lt 100 ]; then
+            echo "::error::the index holds $DECL_COUNT declarations"
+            exit 1
+          fi
+
+          # The whole claim of `auto`: the exporter that ran is one built for
+          # the Lean this repository pins.  meta.json is where the exporter
+          # says which that was, so it is what gets checked rather than the
+          # tag name the resolution step printed.
+          WANT="$(tr -d '[:space:]' < lean-toolchain)"
+          WANT="${WANT##*:}"
+          GOT="v$(sed -n 's/.*"toolchain"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INDEX_PATH/meta.json" | head -1)"
+          if [ "$GOT" != "$WANT" ]; then
+            echo "::error::this repository pins Lean $WANT but the index was written by $GOT"
+            exit 1
+          fi
+          echo "auto selected the trust released for Lean $WANT"
