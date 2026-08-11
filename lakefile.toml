@@ -1,6 +1,7 @@
 name = "trust"
 version = "0.1.0"
 defaultTargets = ["trust"]
+testDriver = "tests"
 
 [[require]]
 name = "aftk"
@@ -25,4 +26,11 @@ name = "Trust"
 [[lean_exe]]
 name = "trust"
 root = "Main"
+supportInterpreter = true
+# The suite is a plain executable rather than a test framework: LSpec would be a
+# third dependency to keep building on whichever Lean this repository pins, and
+# what these tests need is an assertion and an exit code.
+[[lean_exe]]
+name = "tests"
+root = "Tests.Main"
 supportInterpreter = true
