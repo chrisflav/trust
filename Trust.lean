@@ -12,4 +12,5 @@ import Trust.Time
 import Trust.Pgp
 import Trust.Net
 import Trust.Federation
+import Trust.Serve
 import Trust.Cli

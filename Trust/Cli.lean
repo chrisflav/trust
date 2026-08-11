@@ -8,6 +8,7 @@ import Trust.Code
 import Trust.Marks
 import Trust.Hash
 import Trust.Cert
+import Trust.Serve
 
 /-!
 # Command line interface
@@ -43,6 +44,7 @@ Usage:
   trust check [options] <module>
   trust sync-marks [options] <module>
   trust marks [options]
+  trust serve-marks [options] [<module>]
   trust cert issue [options] <module> <declaration>
   trust cert sign [options] <file>
   trust cert verify <file>
@@ -64,6 +66,7 @@ Commands:
   check         Report protected declarations whose content has changed.
   sync-marks    Refresh an existing index's marks.json without re-exporting it.
   marks         Print the marks file.
+  serve-marks   Serve the marks file over HTTP, for the frontend's dev server.
   cert          Issue, sign, verify and publish trust certificates.
 
 Options for deps:
@@ -273,6 +276,8 @@ structure MarkOptions where
   hasher : String := ""
   /-- A node to read a bundle from, instead of a file. -/
   from? : String := ""
+  /-- Port for `serve-marks`. -/
+  port : Nat := 8123
 
 /-- Parse the options shared by `trusted`, `protect`, `characterize` and `check`. -/
 def parseMark (args : List String) : Except String (MarkOptions × Array String) :=
@@ -295,6 +300,7 @@ where
       else if arg == "--token" then go rest { opts with token := value } positionals
       else if arg == "--hasher" then go rest { opts with hasher := value } positionals
       else if arg == "--from" then go rest { opts with from? := value } positionals
+      else if arg == "--port" then go rest { opts with port := value.toNat!.max 1 } positionals
       else if arg.startsWith "-" then .error s!"unknown option `{arg}`"
       else go (value :: rest) opts (positionals.push arg)
     | arg :: rest =>
@@ -540,6 +546,30 @@ def run (args : List String) : IO UInt32 := do
     | .ok (opts, _) =>
       let marks ← Marks.load opts.marksPath
       IO.println (toJson marks).pretty
+      return 0
+  | "serve-marks" :: rest =>
+    match parseMark rest with
+    | .error msg =>
+      IO.eprintln s!"error: {msg}"
+      return 1
+    | .ok (opts, positionals) =>
+      -- With a module, protecting a declaration from the browser records its
+      -- hash immediately; without one, the endpoint still serves and writes,
+      -- and a newly protected declaration waits for `trust protect` as it did
+      -- when a Vite middleware owned this file.
+      let hashOf ←
+        if h : 0 < positionals.size then do
+          let moduleName := positionals[0].toName
+          let env ← AFTK.loadModuleEnvironment moduleName
+          let hasher := defaultHasher
+          pure fun (name : String) => do
+            match ← hasher.hash env name.toName with
+            | some hash => pure (some (hash, hasher.name))
+            | none => pure none
+        else do
+          IO.eprintln "trust: no module given, so new protections record no hash"
+          pure fun _ => pure none
+      serveMarks opts.marksPath (UInt16.ofNat opts.port) hashOf
       return 0
   | "cert" :: sub :: rest =>
     match parseMark rest with
