@@ -1,0 +1,123 @@
+# One path through all four repositories.
+#
+#   core exports an index  →  a node comes up  →  the CLI issues, signs and
+#   publishes  →  the node hands it back  →  the CLI repeats the node's own
+#   check  →  the frontend agrees with core about the bytes.
+#
+# Nothing here is mocked: real gpg keys with real signing subkeys, a real
+# socket, a real export.  It lives in this repository because this is where the
+# contract lives — `Trust.Federation` and `conformance/` are what the other
+# three agree on, so this is the right place to find out that they no longer do.
+#
+# The other three are cloned rather than checked out with `actions/checkout`:
+# they are public, so an anonymous clone works and no token has to be minted for
+# a job that only reads.
+name: Integration
+
+on:
+  schedule:
+    # Nightly, because what this catches is drift between repositories that
+    # nobody changed together.
+    - cron: '0 4 * * *'
+  workflow_dispatch:
+  push:
+    branches: [master]
+
+jobs:
+  four-repositories:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out core
+        uses: actions/checkout@v5
+
+      - name: Say which gpg and curl are in play
+        run: |
+          gpg --version | head -1
+          curl --version | head -1
+
+      - uses: leanprover/lean-action@v1
+        with:
+          test: true
+
+      - name: Export an index
+        run: |
+          set -euo pipefail
+          lake env ./.lake/build/bin/trust export \
+            --repo mylib --out "$RUNNER_TEMP/index" --with-hashes Init.Data.Nat.Gcd
+          test -s "$RUNNER_TEMP/index/mylib/meta.json"
+          DECLS="$(grep -c '' "$RUNNER_TEMP/index/mylib/decls.jsonl")"
+          echo "index holds $DECLS declarations"
+          # A handful would mean the environment loaded but nothing was walked.
+          test "$DECLS" -gt 100
+
+      - name: Check the conformance vectors against this implementation
+        run: ./.lake/build/bin/trust conformance --check
+
+      - name: Build the node and the CLI
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/chrisflav/trust-server "$RUNNER_TEMP/trust-server"
+          git clone --depth 1 https://github.com/chrisflav/trust-cli "$RUNNER_TEMP/trust-cli"
+          # Both require `trust` at `master`; this run is about whether that is
+          # still true of the commit under test, so point them at it.
+          for d in trust-server trust-cli; do
+            (cd "$RUNNER_TEMP/$d" && lake update trust && lake build)
+          done
+
+      - name: Start a node
+        run: |
+          set -euo pipefail
+          TRUST_LOCAL=true TRUST_STORE_DIR="$RUNNER_TEMP/store" PORT=8099 \
+            NODE_NAME=integration \
+            "$RUNNER_TEMP/trust-server/.lake/build/bin/trust-server" &
+          for _ in $(seq 1 60); do
+            curl -sS -m 2 -o /dev/null http://127.0.0.1:8099/api/health && break || sleep 1
+          done
+          curl -sS -m 5 http://127.0.0.1:8099/api/health
+
+      - name: Issue, sign, publish, fetch, and check it again
+        run: |
+          set -euo pipefail
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -p "$GNUPGHOME" && chmod 700 "$GNUPGHOME"
+          gpg --batch --quiet --passphrase '' \
+            --quick-gen-key 'Integration <it@example.org>' ed25519 sign never
+          FPR="$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr:/{print $10; exit}')"
+          # A signing subkey, because that is the ordinary shape and the one
+          # §3.4 rule 3 is about: the signature's fingerprint is not the entry's.
+          gpg --batch --quiet --passphrase '' --quick-add-key "$FPR" ed25519 sign never
+          gpg --armor --export it@example.org > "$RUNNER_TEMP/pub.asc"
+
+          CLI="$RUNNER_TEMP/trust-cli/.lake/build/bin/trust-cert"
+          lake env "$CLI" issue --repo mylib --note "integration" \
+            -o "$RUNNER_TEMP/cert.json" Init.Data.Nat.Gcd Nat.gcd
+          "$CLI" sign "$RUNNER_TEMP/cert.json" --key "$FPR"
+          "$CLI" show "$RUNNER_TEMP/cert.json"
+
+          # The node verifies against a key it holds, so register it first.
+          curl -sS -m 10 -X POST http://127.0.0.1:8099/api/keys \
+            -H 'Content-Type: application/json' -H 'Authorization: Bearer local' \
+            --data-binary @<(jq -Rs '{armored: .}' < "$RUNNER_TEMP/pub.asc")
+
+          TRUST_SERVER=http://127.0.0.1:8099 TRUST_TOKEN=local \
+            "$CLI" publish "$RUNNER_TEMP/cert.json"
+
+          HASH="$(jq -r '.claim.hash' < "$RUNNER_TEMP/cert.json")"
+          curl -sS -m 10 "http://127.0.0.1:8099/api/certificates?hash=$HASH" | head -c 400
+          echo
+
+          # The point of the whole arrangement: the CLI applies §3.4 through the
+          # same `Trust.Federation` the node's import path does.
+          "$CLI" verify-bundle --from http://127.0.0.1:8099
+
+      - name: The frontend, against the same vectors
+        run: |
+          set -euo pipefail
+          git clone --depth 1 https://github.com/chrisflav/trust-web "$RUNNER_TEMP/trust-web"
+          cp -r conformance "$RUNNER_TEMP/trust-web/conformance"
+          cd "$RUNNER_TEMP/trust-web"
+          npm ci
+          npm run build
+          npm test
