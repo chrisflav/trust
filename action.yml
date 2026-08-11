@@ -1,0 +1,479 @@
+# A library's index is only useful if it tracks the library, so generating it
+# belongs in the library's CI rather than in a person's terminal.  This is that
+# step, packaged: build `trust`, run `trust export` inside the caller's
+# repository, and hand back the directory.
+#
+# It lives at the repository root because that is the only place from which
+# `uses: chrisflav/trust@<ref>` resolves.  A subdirectory action would work
+# (`uses: chrisflav/trust/actions/index@<ref>`), but the short form is the one
+# people will guess, and it is the only form the Marketplace accepts.
+#
+# Composite rather than JavaScript: every step here is a shell command or an
+# existing action, and a JavaScript action would mean a committed `dist/` bundle
+# that has to be rebuilt — and can silently disagree with the source it was
+# built from — for no behaviour that `run:` cannot express.
+name: 'Generate a trust index'
+description: >-
+  Export a Lean library as a static trust index: the definitional dependency
+  graph the trust web UI and CLI read.
+author: 'chrisflav'
+
+branding:
+  icon: 'git-merge'
+  color: 'purple'
+
+inputs:
+  module:
+    description: >-
+      The root module to export, e.g. `Mathlib` or `Init`.  Its whole import
+      closure is indexed.  One module only: `trust export` writes one index per
+      import closure under one `--repo` name, and the frontend selects an index
+      by that name, so a library with several unrelated roots wants several runs
+      of this action with different `index-name`s.
+    required: true
+  index-name:
+    description: >-
+      Name of the index, used as the output subdirectory and as the `?repo=`
+      value the frontend selects it by.  Defaults to this repository's name.
+    required: false
+    default: ''
+  output-dir:
+    description: >-
+      Directory to write the index into; the index itself lands in
+      `<output-dir>/<index-name>`.  Relative paths are taken from the workspace
+      root, not from `working-directory`.
+    required: false
+    default: 'trust-index'
+  working-directory:
+    description: >-
+      The Lake package to export, relative to the workspace root.  The export
+      runs inside it via `lake env`, so its `.olean` files are what gets
+      indexed.
+    required: false
+    default: '.'
+  with-bodies:
+    description: >-
+      Export the edges that come from definition bodies.  Without them
+      definitions do not unfold in the UI, which is most of what it is for.
+      Proof terms are never exported, with or without this.
+    required: false
+    default: 'true'
+  with-code:
+    description: >-
+      Export rendered, clickable declaration source.  This is the largest part
+      of an index by far — 25 MB of Lean core's 40 MB — but without it the UI
+      shows names and no statements.
+    required: false
+    default: 'true'
+  with-hashes:
+    description: >-
+      Record each declaration's semantic hash, so the index can be matched
+      against trust certificates.  Off by default: it is a whole-environment
+      pass, a further minute for Lean core, and only an index that will be held
+      up against certificates needs it.
+    required: false
+    default: 'false'
+  fast-prop:
+    description: >-
+      Treat exactly the theorems as proofs instead of asking `MetaM`.  Faster,
+      and wrong for a definition whose type happens to be a `Prop`.
+    required: false
+    default: 'false'
+  module-filter:
+    description: >-
+      Restrict the exported declarations to matching modules, as a
+      comma-separated list of aftk patterns (`A.B.C`, `A.B.*`, `*`).  Empty
+      means every module in the import closure, including the dependencies'.
+    required: false
+    default: ''
+  marks:
+    description: >-
+      Marks file to carry into the index, relative to `working-directory`.
+      Empty leaves `trust export` to its default of `trust-marks.json` there —
+      note that this is the *indexed* repository's file, not trust's.
+    required: false
+    default: ''
+  rev:
+    description: >-
+      Revision to record in `meta.json`.  Empty lets `trust` read it from git in
+      the checked-out repository, which is right for nearly everything; set it
+      when the checkout is not the commit you mean, as for a pull request, whose
+      checked-out commit is a merge that exists nowhere else.
+    required: false
+    default: ''
+  build-library:
+    description: >-
+      Build the library before exporting it.  The export reads `.olean` files,
+      so something has to have built them; turn this off only if an earlier step
+      in your job already did.
+    required: false
+    default: 'true'
+  trust-ref:
+    description: >-
+      Build `trust` from this ref instead of from the copy this action came
+      with.  Empty is the sane default and keeps the two in step: the action and
+      the exporter it drives are then always the same commit.
+    required: false
+    default: ''
+  require-matching-toolchain:
+    description: >-
+      Fail when this repository and `trust` name different Lean toolchains.
+      Turn it off only when you know the two files name the same Lean by
+      different strings; see the note in the README about why there is no option
+      to build `trust` on your toolchain instead.
+    required: false
+    default: 'true'
+  cache:
+    description: >-
+      Cache the built `trust` binary between runs, keyed on a hash of its
+      sources and the toolchain.
+    required: false
+    default: 'true'
+
+outputs:
+  index-path:
+    description: 'The generated index directory, the one containing meta.json.'
+    value: ${{ steps.resolve.outputs.index-path }}
+  index-root:
+    description: >-
+      The directory holding the index directory — what to copy to
+      `web/public/index`, since the frontend expects `<root>/<name>/meta.json`.
+    value: ${{ steps.resolve.outputs.index-root }}
+  index-name:
+    description: 'The name the index was written under, i.e. the `?repo=` value.'
+    value: ${{ steps.resolve.outputs.index-name }}
+  rev:
+    description: 'The revision recorded in the index, as meta.json reports it.'
+    value: ${{ steps.report.outputs.rev }}
+  decl-count:
+    description: 'How many declarations the index holds.'
+    value: ${{ steps.report.outputs.decl-count }}
+  trust-bin:
+    description: >-
+      The `trust` binary that was built, so a later step can run `trust check`
+      or `trust cert issue` without building it a second time.
+    value: ${{ steps.build-trust.outputs.trust-bin }}
+
+runs:
+  using: composite
+  steps:
+    # Everything user-supplied is validated once, here, and every later step
+    # reads the results rather than the inputs.  Two reasons: a typo like
+    # `with-code: yes` would otherwise be silently read as false and produce an
+    # index missing a quarter of itself, and the flag string the exporter is
+    # invoked with is then built from a fixed vocabulary rather than from
+    # anything a caller wrote.
+    - name: Check the inputs and resolve the defaults
+      id: resolve
+      shell: bash
+      env:
+        MODULE: ${{ inputs.module }}
+        INDEX_NAME: ${{ inputs.index-name }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        WITH_BODIES: ${{ inputs.with-bodies }}
+        WITH_CODE: ${{ inputs.with-code }}
+        WITH_HASHES: ${{ inputs.with-hashes }}
+        FAST_PROP: ${{ inputs.fast-prop }}
+        BUILD_LIBRARY: ${{ inputs.build-library }}
+        REQUIRE_MATCHING_TOOLCHAIN: ${{ inputs.require-matching-toolchain }}
+        CACHE: ${{ inputs.cache }}
+        TRUST_REF: ${{ inputs.trust-ref }}
+        ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+
+        # `true`/`false` as strings is all an action input can be, so the check
+        # has to be explicit; anything else is a mistake rather than a false.
+        check_bool () {
+          case "$2" in
+            true|false) ;;
+            *) echo "::error::input \`$1\` must be 'true' or 'false', not '$2'"; exit 1 ;;
+          esac
+        }
+        # These end up in $GITHUB_OUTPUT as `name=value` lines, which a newline
+        # would turn into a second, attacker-chosen output.
+        reject_newlines () {
+          if [ "$(printf '%s' "$2" | wc -l)" -ne 0 ]; then
+            echo "::error::input \`$1\` must not contain a newline"; exit 1
+          fi
+        }
+
+        check_bool with-bodies "$WITH_BODIES"
+        check_bool with-code "$WITH_CODE"
+        check_bool with-hashes "$WITH_HASHES"
+        check_bool fast-prop "$FAST_PROP"
+        check_bool build-library "$BUILD_LIBRARY"
+        check_bool require-matching-toolchain "$REQUIRE_MATCHING_TOOLCHAIN"
+        check_bool cache "$CACHE"
+        reject_newlines module "$MODULE"
+        reject_newlines index-name "$INDEX_NAME"
+        reject_newlines output-dir "$OUTPUT_DIR"
+        reject_newlines working-directory "$WORKING_DIRECTORY"
+
+        # A module name with a space in it is two arguments to the exporter, and
+        # one starting with `-` is an option; both fail obscurely much later.
+        case "$MODULE" in
+          '') echo "::error::input \`module\` is required"; exit 1 ;;
+          -*) echo "::error::\`module\` must be a module name, not an option: '$MODULE'"; exit 1 ;;
+          *[[:space:]]*)
+            echo "::error::\`module\` takes one module, not '$MODULE'.  An index is one import closure; use the action once per root module, with a different \`index-name\` each time."
+            exit 1 ;;
+        esac
+
+        # The repository name, because an index is nearly always *of* a
+        # repository and naming it twice is a thing to get wrong.  Resolved here
+        # rather than as an input default: expression contexts in action input
+        # defaults are not something to rely on, and $GITHUB_REPOSITORY always
+        # exists.
+        if [ -z "$INDEX_NAME" ]; then
+          INDEX_NAME="${GITHUB_REPOSITORY##*/}"
+        fi
+        # It becomes a directory name and a URL parameter.
+        case "$INDEX_NAME" in
+          *[!A-Za-z0-9._-]*|''|.|..|-*)
+            echo "::error::\`index-name\` must be a plain name of letters, digits, dot, dash or underscore: '$INDEX_NAME'"
+            exit 1 ;;
+        esac
+
+        # The exporter runs with the target repository as its working directory,
+        # so a relative --out would land inside the library being indexed.
+        # Anchoring on the workspace instead makes `output-dir` mean the same
+        # thing whatever `working-directory` is.
+        case "$OUTPUT_DIR" in
+          /*) ;;
+          *) OUTPUT_DIR="$GITHUB_WORKSPACE/$OUTPUT_DIR" ;;
+        esac
+        case "$WORKING_DIRECTORY" in
+          /*) ;;
+          *) WORKING_DIRECTORY="$GITHUB_WORKSPACE/$WORKING_DIRECTORY" ;;
+        esac
+        if [ ! -d "$WORKING_DIRECTORY" ]; then
+          echo "::error::no such directory '$WORKING_DIRECTORY'.  Has the repository been checked out?"
+          exit 1
+        fi
+        WORKING_DIRECTORY="$(cd "$WORKING_DIRECTORY" && pwd -P)"
+
+        # With no `trust-ref` the sources are the ones GitHub already fetched to
+        # run this action, so the exporter is by construction the one this
+        # action.yml was written against.  A `trust-ref` breaks that link, which
+        # is the whole point of the input, so it goes somewhere else entirely.
+        if [ -n "$TRUST_REF" ]; then
+          TRUST_SRC="$GITHUB_WORKSPACE/.trust-source"
+        else
+          TRUST_SRC="$ACTION_PATH"
+        fi
+
+        FLAGS=""
+        if [ "$WITH_BODIES" = true ]; then FLAGS="$FLAGS --with-bodies"; fi
+        if [ "$WITH_CODE" = true ]; then FLAGS="$FLAGS --with-code"; fi
+        if [ "$WITH_HASHES" = true ]; then FLAGS="$FLAGS --with-hashes"; fi
+        if [ "$FAST_PROP" = true ]; then FLAGS="$FLAGS --fast-prop"; fi
+
+        {
+          echo "index-name=$INDEX_NAME"
+          echo "index-root=$OUTPUT_DIR"
+          echo "index-path=$OUTPUT_DIR/$INDEX_NAME"
+          echo "work-dir=$WORKING_DIRECTORY"
+          echo "trust-src=$TRUST_SRC"
+          echo "export-flags=$FLAGS"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Check out the requested trust ref
+      if: inputs.trust-ref != ''
+      uses: actions/checkout@v5
+      with:
+        repository: chrisflav/trust
+        ref: ${{ inputs.trust-ref }}
+        path: .trust-source
+
+    # `.olean` files can only be read by the exact Lean that wrote them, so a
+    # toolchain mismatch is fatal — but it fails somewhere inside Lean, with an
+    # error about a module header rather than about versions.  Better to say it
+    # here, naming both files, than to let a maintainer read a stack trace.
+    #
+    # There is deliberately no option to build `trust` on *your* toolchain
+    # instead: trust's source only compiles against the Lean it pins, since the
+    # metaprogramming API it uses moves every release, so that option would trade
+    # this clear failure for a compile error deep in someone else's code.  The
+    # escape hatch that does exist is for the other case — two files naming the
+    # same Lean differently, which elan accepts and a string comparison does not.
+    - name: Check that trust and this library agree on a toolchain
+      id: toolchain
+      shell: bash
+      env:
+        TRUST_SRC: ${{ steps.resolve.outputs.trust-src }}
+        WORK_DIR: ${{ steps.resolve.outputs.work-dir }}
+        REQUIRE_MATCHING_TOOLCHAIN: ${{ inputs.require-matching-toolchain }}
+      run: |
+        set -euo pipefail
+
+        read_toolchain () {
+          if [ ! -f "$1/lean-toolchain" ]; then
+            echo "::error::no lean-toolchain in '$1'"
+            exit 1
+          fi
+          tr -d '[:space:]' < "$1/lean-toolchain"
+        }
+        THEIRS="$(read_toolchain "$WORK_DIR")"
+        OURS="$(read_toolchain "$TRUST_SRC")"
+
+        if [ "$THEIRS" != "$OURS" ]; then
+          echo "this library: $THEIRS  ($WORK_DIR/lean-toolchain)" >&2
+          echo "trust:        $OURS  ($TRUST_SRC/lean-toolchain)" >&2
+          echo "trust reads .olean files, which only the Lean version that wrote them can read." >&2
+          echo "Either wait for trust to be bumped to $THEIRS, or pin this workflow to a trust ref on it." >&2
+          if [ "$REQUIRE_MATCHING_TOOLCHAIN" = true ]; then
+            echo "::error::Lean toolchain mismatch: this library is on $THEIRS, trust is on $OURS"
+            exit 1
+          fi
+          echo "::warning::Lean toolchain mismatch ($THEIRS vs $OURS), continuing because require-matching-toolchain is false"
+        fi
+
+        # The cache key is a hash of the sources the binary is built from, not a
+        # ref: `trust-ref: main` is a moving target, and a key that does not move
+        # with it would serve yesterday's binary for ever.  Nothing here is
+        # allowed to be missing — a silently empty file list would hash to the
+        # same thing for every possible source tree.
+        sha256_stdin () {
+          if command -v sha256sum > /dev/null; then sha256sum; else shasum -a 256; fi
+        }
+        # Names as well as contents: two files swapping their contents is a
+        # different binary, and hashing the concatenation alone would not see it.
+        SOURCE_HASH="$(cd "$TRUST_SRC" \
+          && find Trust Trust.lean Main.lean lakefile.toml lake-manifest.json lean-toolchain -type f -print0 \
+          | LC_ALL=C sort -z \
+          | while IFS= read -r -d '' f; do printf '%s\0' "$f"; cat "$f"; done \
+          | sha256_stdin | cut -d' ' -f1)"
+
+        {
+          # `:` and `/` are legal in a cache key but make one hard to read in a
+          # log; the slug is only ever used as a key fragment.
+          echo "toolchain-slug=$(printf '%s' "$OURS" | tr -c 'A-Za-z0-9._-' '-')"
+          echo "source-hash=$SOURCE_HASH"
+        } >> "$GITHUB_OUTPUT"
+
+    # elan, the toolchain, and — when asked — the library itself.  lean-action
+    # rather than a hand-rolled elan install because it also knows about the
+    # Mathlib build cache, without which indexing a Mathlib-based library would
+    # start by compiling Mathlib.
+    - name: Set up Lean and build the library
+      uses: leanprover/lean-action@v1
+      with:
+        lake-package-directory: ${{ inputs.working-directory }}
+        build: ${{ inputs.build-library }}
+        test: false
+        lint: false
+
+    # Exact key, no `restore-keys`: a near-miss restore is a binary built from
+    # some other version of these sources, which would then export a library
+    # under a name and a schema that no longer match.  `lake build` still runs
+    # after a hit, so even a partial cache from a failed run is completed rather
+    # than trusted.
+    - name: Restore the trust build
+      if: inputs.cache == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ${{ steps.resolve.outputs.trust-src }}/.lake/build
+          ${{ steps.resolve.outputs.trust-src }}/.lake/packages
+        key: trust-bin-v1-${{ runner.os }}-${{ runner.arch }}-${{ steps.toolchain.outputs.toolchain-slug }}-${{ steps.toolchain.outputs.source-hash }}
+
+    - name: Build trust
+      id: build-trust
+      shell: bash
+      env:
+        TRUST_SRC: ${{ steps.resolve.outputs.trust-src }}
+      run: |
+        set -euo pipefail
+        cd "$TRUST_SRC"
+        lake build
+        BIN="$TRUST_SRC/.lake/build/bin/trust"
+        if [ ! -x "$BIN" ]; then
+          echo "::error::lake build produced no binary at $BIN"
+          exit 1
+        fi
+        echo "trust-bin=$BIN" >> "$GITHUB_OUTPUT"
+
+    # `lake env` is what puts the library's oleans on LEAN_PATH, and it only
+    # does so from inside the package, which is why this runs there rather than
+    # passing a path.
+    - name: Export the index
+      id: export
+      shell: bash
+      env:
+        TRUST_BIN: ${{ steps.build-trust.outputs.trust-bin }}
+        WORK_DIR: ${{ steps.resolve.outputs.work-dir }}
+        INDEX_NAME: ${{ steps.resolve.outputs.index-name }}
+        INDEX_ROOT: ${{ steps.resolve.outputs.index-root }}
+        EXPORT_FLAGS: ${{ steps.resolve.outputs.export-flags }}
+        MODULE: ${{ inputs.module }}
+        MODULE_FILTER: ${{ inputs.module-filter }}
+        MARKS: ${{ inputs.marks }}
+        REV: ${{ inputs.rev }}
+      run: |
+        set -euo pipefail
+        cd "$WORK_DIR"
+        mkdir -p "$INDEX_ROOT"
+
+        args=(export --repo "$INDEX_NAME" --out "$INDEX_ROOT")
+        # Unquoted on purpose, and the only place that is: these words were
+        # assembled from a fixed set of literals in `resolve`, never from input
+        # text.  Everything below is a caller's string and stays one argument.
+        args+=($EXPORT_FLAGS)
+        if [ -n "$MODULE_FILTER" ]; then args+=(--module "$MODULE_FILTER"); fi
+        if [ -n "$MARKS" ]; then args+=(--marks "$MARKS"); fi
+        if [ -n "$REV" ]; then args+=(--rev "$REV"); fi
+        args+=("$MODULE")
+
+        lake env "$TRUST_BIN" "${args[@]}"
+
+    - name: Report what was written
+      id: report
+      shell: bash
+      env:
+        INDEX_PATH: ${{ steps.resolve.outputs.index-path }}
+        INDEX_NAME: ${{ steps.resolve.outputs.index-name }}
+      run: |
+        set -euo pipefail
+        META="$INDEX_PATH/meta.json"
+        if [ ! -f "$META" ]; then
+          echo "::error::the export wrote no $META"
+          exit 1
+        fi
+
+        # meta.json is the index's own account of itself, so the outputs are
+        # read back from it rather than guessed at from the inputs: what the
+        # caller is told is then what a reader of the index will see.
+        field () { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\"\\([^\"]*\\)\".*/\\1/p" "$META" | head -1; }
+        number () { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\\([0-9][0-9]*\\).*/\\1/p" "$META" | head -1; }
+
+        REV="$(field rev)"
+        DECL_COUNT="$(number declCount)"
+        STMT_EDGES="$(number stmtEdgeCount)"
+        BODY_EDGES="$(number bodyEdgeCount)"
+
+        # Not fatal: an index without a revision is still a usable index, it
+        # just cannot be tied to a commit.  git declines to answer in a checkout
+        # it considers unsafe to own, which is the likely cause and is worth
+        # naming.
+        if [ -z "$REV" ]; then
+          echo "::warning::the index records no revision: git in the exported package answered nothing.  Pass the \`rev\` input to record one."
+        fi
+
+        {
+          echo "rev=$REV"
+          echo "decl-count=$DECL_COUNT"
+        } >> "$GITHUB_OUTPUT"
+
+        {
+          echo "### trust index \`$INDEX_NAME\`"
+          echo
+          echo "| | |"
+          echo "|---|---|"
+          echo "| declarations | $DECL_COUNT |"
+          echo "| statement edges | $STMT_EDGES |"
+          echo "| body edges | $BODY_EDGES |"
+          echo "| revision | \`${REV:-unknown}\` |"
+          echo "| size | $(du -sh "$INDEX_PATH" | cut -f1) |"
+        } >> "$GITHUB_STEP_SUMMARY"

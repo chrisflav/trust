@@ -148,6 +148,96 @@ content hash still needs Lean, so a declaration protected from the UI reads as
 merges the existing snapshot history on every write, so editing from the browser
 never discards hashes the browser does not know about.
 
+## Generating an index in CI
+
+An index is only worth as much as it is current, and a library moves whether or
+not anyone remembers to re-export it.  So the export belongs in the library's
+own CI.  The action at the root of this repository builds `trust`, runs the
+export inside your checkout, and hands back the directory it wrote:
+
+```yaml
+name: Trust index
+
+on: [push, workflow_dispatch]
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - id: trust
+        uses: chrisflav/trust@master
+        with:
+          module: MyLibrary
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trust-index
+          path: ${{ steps.trust.outputs.index-root }}
+```
+
+`module` is the only input you have to give: the root module whose import
+closure is indexed, exactly the argument `trust export` takes.  Everything else
+has a default — the index is named after the repository, written to
+`trust-index/<name>/`, and the library is built first, since the export reads
+`.olean` files and something has to have produced them.  Statement edges, body
+edges and rendered code are all exported; semantic hashes are not, because that
+is a further whole-environment pass and only an index that will be held up
+against trust certificates needs them (`with-hashes: 'true'`).
+
+The remaining inputs are `index-name`, `output-dir`, `working-directory` (for a
+package that is not at the repository root), `module-filter`, `marks`, `rev`,
+`build-library`, `with-bodies`, `with-code`, `fast-prop`, `trust-ref`, `cache`
+and `require-matching-toolchain`; `action.yml` documents each one.  The outputs
+are `index-path`, `index-root`, `index-name`, `rev`, `decl-count` and
+`trust-bin` — the last so that a later step can run `trust check` to gate the
+build on protected declarations without building `trust` twice.
+
+Pin the ref once you care that the index does not change underneath you: the ref
+you name is the exporter you get, and the exporter decides both the schema and
+the toolchain you are held to.
+
+> [!WARNING]
+> A `.olean` file can only be read by the exact Lean version that wrote it, so
+> `trust` can only index a library on **its own toolchain** — currently
+> `leanprover/lean4:v4.31.0`.  The action compares the two `lean-toolchain`
+> files and stops there, naming both versions, rather than letting it fail
+> somewhere inside Lean with a message about a module header.
+>
+> There is deliberately no option to build `trust` on your toolchain instead:
+> its source only compiles against the Lean it pins, so that would trade a clear
+> error for a compile failure in someone else's code.  If the versions differ,
+> either the library or `trust` has to move.  `require-matching-toolchain:
+> 'false'` exists only for the case where the two files name the same Lean by
+> different strings, which elan accepts and a string comparison does not.
+
+This repository runs the action against a Lean core module on every pull
+request (`.github/workflows/trust-index.yml`), so the snippet above is
+exercised rather than asserted.
+
+### Pointing the interface at the result
+
+The frontend reads `<root>/<name>/meta.json`, and `?repo=` selects the name, so
+an artifact downloaded from CI is unpacked and served as it stands:
+
+```bash
+unzip trust-index.zip -d web/public/index
+cd web && npm run dev      # http://localhost:5173/?repo=mylibrary
+```
+
+A deployed instance is the same thing: `docker/docker-compose.yml` bind-mounts
+`web/public/index`, so replacing a directory under it publishes a new index
+without rebuilding anything.
+
+The CLI operates on a downloaded index too — `trust sync-marks` refreshes the
+judgements in one in seconds, without the export that produced it:
+
+```bash
+cd /path/to/mylibrary
+lake env /path/to/trust/.lake/build/bin/trust sync-marks \
+  --repo mylibrary --out /path/to/trust/web/public/index \
+  --marks trust-marks.json MyLibrary
+```
+
 ## Trust certificates (server)
 
 A certificate is one person's assertion about one declaration, keyed by its

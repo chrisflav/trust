@@ -1,0 +1,90 @@
+# The action in this repository's root is meant to be run by other people's
+# workflows, where a mistake in it surfaces as a broken build in a library we do
+# not own.  So it runs here first, on every pull request, against a Lean core
+# module small enough to export in seconds — Mathlib would be twenty-five
+# minutes and would tell us nothing this does not.
+name: Trust index
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+# Only the newest commit on a branch is worth indexing; the older run is
+# answering a question nobody is still asking.
+concurrency:
+  group: trust-index-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v5
+
+      # `./` rather than a released ref, so a pull request exercises the action
+      # as it would be after merging rather than as it already is.
+      - id: index
+        uses: ./
+        with:
+          module: Init.Data.Nat.Gcd
+          index-name: core-gcd
+          with-bodies: 'true'
+          with-code: 'true'
+
+      # An action that runs without failing has not shown that it produced
+      # anything: `trust export` writes its files whatever it found, so the
+      # check is that the index has contents and that the outputs describe
+      # them.
+      - name: Check the index
+        shell: bash
+        env:
+          INDEX_PATH: ${{ steps.index.outputs.index-path }}
+          INDEX_NAME: ${{ steps.index.outputs.index-name }}
+          DECL_COUNT: ${{ steps.index.outputs.decl-count }}
+          REV: ${{ steps.index.outputs.rev }}
+          TRUST_BIN: ${{ steps.index.outputs.trust-bin }}
+        run: |
+          set -euo pipefail
+
+          for f in meta.json decls.jsonl stmt-edges.bin body-edges.bin code/0.jsonl; do
+            if [ ! -s "$INDEX_PATH/$f" ]; then
+              echo "::error::$INDEX_PATH/$f is missing or empty"
+              exit 1
+            fi
+          done
+
+          if [ "$INDEX_NAME" != core-gcd ]; then
+            echo "::error::index-name output is '$INDEX_NAME'"
+            exit 1
+          fi
+          # The closure of Init.Data.Nat.Gcd is thousands of declarations; a
+          # handful would mean the environment loaded but nothing was walked.
+          if [ "${DECL_COUNT:-0}" -lt 100 ]; then
+            echo "::error::the index holds $DECL_COUNT declarations"
+            exit 1
+          fi
+          if [ -z "$REV" ]; then
+            echo "::error::the index records no revision"
+            exit 1
+          fi
+
+          # Edges are (src, tgt) pairs of little-endian int32, so a file whose
+          # length is not a multiple of eight is a truncated write.
+          BYTES="$(wc -c < "$INDEX_PATH/stmt-edges.bin")"
+          if [ $((BYTES % 8)) -ne 0 ]; then
+            echo "::error::stmt-edges.bin is $BYTES bytes, not a whole number of edges"
+            exit 1
+          fi
+
+          # The binary is an output because a caller may want to go on using it;
+          # that only holds if it is still there and still runs.
+          "$TRUST_BIN" --help > /dev/null
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trust-index-core-gcd
+          # The root rather than the index directory, so the artifact unpacks
+          # into the `<root>/<name>/meta.json` shape the frontend reads.
+          path: ${{ steps.index.outputs.index-root }}
+          retention-days: 7
