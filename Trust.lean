@@ -10,4 +10,6 @@ import Trust.Marks
 import Trust.Hash
 import Trust.Time
 import Trust.Pgp
+import Trust.Net
+import Trust.Federation
 import Trust.Cli
