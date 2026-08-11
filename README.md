@@ -152,8 +152,10 @@ never discards hashes the browser does not know about.
 
 An index is only worth as much as it is current, and a library moves whether or
 not anyone remembers to re-export it.  So the export belongs in the library's
-own CI.  The action at the root of this repository builds `trust`, runs the
-export inside your checkout, and hands back the directory it wrote:
+own CI, as a step —
+[chrisflav/trust-action](https://github.com/chrisflav/trust-action), which
+builds `trust`, runs the export inside your checkout, and hands back the
+directory it wrote:
 
 ```yaml
 name: Trust index
@@ -166,7 +168,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - id: trust
-        uses: chrisflav/trust@master
+        uses: chrisflav/trust-action@v1
         with:
           module: MyLibrary
       - uses: actions/upload-artifact@v4
@@ -184,45 +186,27 @@ edges and rendered code are all exported; semantic hashes are not, because that
 is a further whole-environment pass and only an index that will be held up
 against trust certificates needs them (`with-hashes: 'true'`).
 
-The remaining inputs are `index-name`, `output-dir`, `working-directory` (for a
-package that is not at the repository root), `module-filter`, `marks`, `rev`,
-`build-library`, `with-bodies`, `with-code`, `fast-prop`, `trust-ref`, `cache`
-and `require-matching-toolchain`; `action.yml` documents each one.  The outputs
-are `index-path`, `index-root`, `index-name`, `rev`, `decl-count` and
-`trust-bin` — the last so that a later step can run `trust check` to gate the
-build on protected declarations without building `trust` twice.
+The remaining inputs, the outputs and the rest of it are documented in [that
+repository's README](https://github.com/chrisflav/trust-action#inputs).  Worth
+knowing here: `trust-bin` is an output, so a later step can run `trust check` to
+gate the build on protected declarations without building `trust` twice.
 
-Pin the ref once you care that the index does not change underneath you: the ref
-you name is the exporter you get, and the exporter decides both the schema and
-the toolchain you are held to.
+### Which trust indexes your library
 
-### Letting the toolchain choose the exporter
+Nothing in the workflow above names a version of `trust`, and that is the point.
+An exporter can only read the `.olean` files of the Lean it was built on, so a
+release of `trust` is a release *for* a toolchain and its tag says which:
+`v4.31.0`, `v4.32.0`.  The action reads your `lean-toolchain` and takes the tag
+of that name, which means bumping Lean is one edit rather than two.  Its
+`trust-ref` input is there for when you would rather say it yourself.
 
-Because an exporter can only read the `.olean` files of the Lean it was built
-on, a release of `trust` is a release *for* a toolchain, and its tag is named
-after that Lean: `v4.31.0`, `v4.32.0`.  So the version you need is one you
-already wrote down, in `lean-toolchain`, and `trust-ref: auto` reads it there:
-
-```yaml
-      - uses: chrisflav/trust@v4.32.0
-        with:
-          module: MyLibrary
-          trust-ref: auto
-```
-
-The tag is resolved to the commit it points at, so a moved tag cannot serve a
-stale cached binary, and a Lean with no release yet fails by naming the ones
-that do exist rather than by failing to check something out.
-
-What this buys is that bumping Lean no longer means also editing this file.
-What it costs is the guarantee you get without it: the exporter is then
-whichever one your toolchain maps to, so a Lean bump can bring a new index
-schema without anyone choosing it.  `meta.json` records `schemaVersion` for
-exactly this reason.
+That is also why the action is a separate repository: it is versioned by its own
+inputs and outputs, this is versioned by Lean, and holding them together made
+every caller name one ref for both.
 
 > [!WARNING]
 > A `.olean` file can only be read by the exact Lean version that wrote it, so
-> `trust` can only index a library on **its own toolchain** — currently
+> `trust` can only index a library on **its own toolchain** — this one is
 > `leanprover/lean4:v4.32.0`.  The action compares the two `lean-toolchain`
 > files and stops there, naming both versions, rather than letting it fail
 > somewhere inside Lean with a message about a module header.
@@ -230,13 +214,26 @@ exactly this reason.
 > There is deliberately no option to build `trust` on your toolchain instead:
 > its source only compiles against the Lean it pins, so that would trade a clear
 > error for a compile failure in someone else's code.  If the versions differ,
-> either the library or `trust` has to move.  `require-matching-toolchain:
-> 'false'` exists only for the case where the two files name the same Lean by
-> different strings, which elan accepts and a string comparison does not.
+> either the library or `trust` has to move.
+
+### Releasing a trust for a new Lean
+
+Because the tag is the whole of the mapping, cutting a release is naming it
+after the toolchain the release was built on:
+
+```bash
+git tag -a v4.33.0 -m "trust for Lean v4.33.0"
+git push origin v4.33.0
+```
+
+The name has to match `lean-toolchain` at that commit or the action will refuse
+the pair it was handed — which is what `require-matching-toolchain` is for once
+`trust-ref` is chosen automatically, and the only way the convention can be
+wrong.
 
 This repository runs the action against a Lean core module on every pull
-request (`.github/workflows/trust-index.yml`), so the snippet above is
-exercised rather than asserted.
+request (`.github/workflows/trust-index.yml`), pointing it at the pull request's
+own exporter, so a change here is tested through the thing that will ship it.
 
 ### Pointing the interface at the result
 

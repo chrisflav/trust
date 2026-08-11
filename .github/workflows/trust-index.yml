@@ -1,8 +1,14 @@
-# The action in this repository's root is meant to be run by other people's
-# workflows, where a mistake in it surfaces as a broken build in a library we do
-# not own.  So it runs here first, on every pull request, against a Lean core
-# module small enough to export in seconds — Mathlib would be twenty-five
-# minutes and would tell us nothing this does not.
+# The exporter is reached, by everyone who is not sitting at a terminal,
+# through chrisflav/trust-action — so that is how it is exercised here, on
+# every pull request, against a Lean core module small enough to export in
+# seconds.  Mathlib would be twenty-five minutes and would tell us nothing this
+# does not.
+#
+# The action is the released one and the exporter is this pull request's, which
+# is the arrangement that needs testing: the two are separately versioned, and
+# what breaks a downstream library is a change here that the action it already
+# uses cannot drive.  The action's own tests run the mirror image, a pull
+# request there against the released exporters.
 name: Trust index
 
 on:
@@ -22,22 +28,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      # `./` rather than a released ref, so a pull request exercises the action
-      # as it would be after merging rather than as it already is.
       - id: index
-        uses: ./
+        uses: chrisflav/trust-action@v1
         with:
           module: Init.Data.Nat.Gcd
           index-name: core-gcd
           with-bodies: 'true'
           with-code: 'true'
+          # The exporter under test is this pull request's, which is not what
+          # the action would pick on its own: left to `auto` it would resolve
+          # the release tagged for this repository's toolchain and test the
+          # exporter we already shipped.  The head SHA rather than the merge
+          # commit, since that is a commit the action can check out.
+          trust-ref: ${{ github.event.pull_request.head.sha || github.sha }}
           # What a `pull_request` checks out is a merge commit that exists on no
           # branch and outlives nothing, so an index stamped with it is pinned to
           # a revision nobody can resolve.  This is the case the `rev` input is
           # for, and taking our own advice is the point of running this here.
-          # Empty on `workflow_dispatch`, where the checkout is a real commit and
-          # `trust` reads it from git itself.
-          rev: ${{ github.event.pull_request.head.sha }}
+          rev: ${{ github.event.pull_request.head.sha || github.sha }}
 
       # An action that runs without failing has not shown that it produced
       # anything: `trust export` writes its files whatever it found, so the
@@ -96,54 +104,3 @@ jobs:
           path: ${{ steps.index.outputs.index-root }}
           retention-days: 7
 
-  # `trust-ref: auto` reads this repository's `lean-toolchain` and fetches the
-  # release tagged for that Lean, so what runs here is the pull request's
-  # action.yml driving the *released* exporter rather than the one beside it.
-  # That is the combination every caller of `auto` gets, and the only way to
-  # find out that the tag it names has gone missing is to ask for it.
-  auto:
-    runs-on: ubuntu-latest
-
-    steps:
-      - uses: actions/checkout@v5
-
-      - id: index
-        uses: ./
-        with:
-          module: Init.Data.Nat.Gcd
-          index-name: core-gcd-auto
-          trust-ref: auto
-          # Nothing here reads the source, and the point is the resolution
-          # rather than the export, so skip the largest part of the work.
-          with-code: 'false'
-          rev: ${{ github.event.pull_request.head.sha }}
-
-      - name: Check that auto resolved to this toolchain's release
-        shell: bash
-        env:
-          INDEX_PATH: ${{ steps.index.outputs.index-path }}
-          DECL_COUNT: ${{ steps.index.outputs.decl-count }}
-        run: |
-          set -euo pipefail
-
-          if [ ! -s "$INDEX_PATH/meta.json" ]; then
-            echo "::error::$INDEX_PATH/meta.json is missing or empty"
-            exit 1
-          fi
-          if [ "${DECL_COUNT:-0}" -lt 100 ]; then
-            echo "::error::the index holds $DECL_COUNT declarations"
-            exit 1
-          fi
-
-          # The whole claim of `auto`: the exporter that ran is one built for
-          # the Lean this repository pins.  meta.json is where the exporter
-          # says which that was, so it is what gets checked rather than the
-          # tag name the resolution step printed.
-          WANT="$(tr -d '[:space:]' < lean-toolchain)"
-          WANT="${WANT##*:}"
-          GOT="v$(sed -n 's/.*"toolchain"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$INDEX_PATH/meta.json" | head -1)"
-          if [ "$GOT" != "$WANT" ]; then
-            echo "::error::this repository pins Lean $WANT but the index was written by $GOT"
-            exit 1
-          fi
-          echo "auto selected the trust released for Lean $WANT"
