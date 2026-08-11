@@ -416,12 +416,28 @@ def acceptanceTests : IO (Array Outcome) := do
       eq "and the withdrawals that survived" (report.revocations, keptRevs.size) (1, 1),
       check "every refusal has a reason" (report.reasons.size == 5)]
 
+/-! ## The committed vectors
+
+`conformance/` is what binds the browser's implementation to this one now that
+the server and the CLI are no longer a third and a fourth.  It is checked here
+so that a change to the canonical bytes fails in this repository before it fails
+in somebody else's.
+-/
+
+def conformanceTests : IO (Array Outcome) := do
+  let problems ← Conformance.check "conformance"
+  if problems.isEmpty then
+    return #[check "the committed vectors agree with this implementation" true]
+  return problems.map fun p =>
+    if p.startsWith "SKIPPED" then check p true else check p false
+
 end Tests
 
 open Tests in
 def main : IO UInt32 := do
   let suites : List (String × Suite) :=
     [("timestamps", timeTests), ("canonical bytes", canonicalTests),
+     ("conformance vectors", conformanceTests),
      ("addresses (§5.4)", netTests), ("the protocol", federationTests),
      ("acceptance (§3.4, §6)", acceptanceTests),
      ("signatures", signatureTests)]

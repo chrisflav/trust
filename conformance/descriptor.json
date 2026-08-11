@@ -1,0 +1,6 @@
+{"url": "https://trust.example.org",
+ "software": "trust-server/0.2.0",
+ "protocol": "trust/1",
+ "policy": {"maxEntries": 500, "maxDepth": 2, "autodiscover": false},
+ "name": "example",
+ "counts": {"peers": 3, "certificates": 1200}}
