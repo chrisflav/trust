@@ -246,6 +246,7 @@ def netTests : Suite := do
   let normal (url : String) : String := (Net.normalizeUrl url).toOption.getD "<error>"
   -- 169.254.169.254 is the address §5.4 names, so it gets its own line.
   let metadata := v4 169 254 169 254
+  let postArgs := Net.postJsonArgs "https://example.org" ""
   let localhost ← Net.check "http://127.0.0.1:8090"
   let localhostAllowed ← Net.check "http://127.0.0.1:8090" { allowPrivate := true }
   let httpsLocal ← Net.check "https://127.0.0.1"
@@ -289,7 +290,20 @@ def netTests : Suite := do
       (match httpsLocal with | .error _ => true | .ok _ => false),
     check "allowPrivate is what local mode turns on"
       (match localhostAllowed with | .ok p => p.address == "127.0.0.1" && p.port == 8090 | .error _ => false)
-      (toString (localhostAllowed.toOption.map (·.address)))]
+      (toString (localhostAllowed.toOption.map (·.address))),
+    -- A POST said what it was sending and never what it would read, so GitHub's
+    -- token endpoint answered in `application/x-www-form-urlencoded` — its
+    -- documented default — and the JSON parse of a successful exchange found no
+    -- token in it.  Sign-in could not have worked, and the message it failed
+    -- with named nothing that was wrong.
+    check "a POST asks for JSON back, not only sends it"
+      (postArgs.contains "Accept: application/json"),
+    check "a POST still says what it sends"
+      (postArgs.contains "Content-Type: application/json"),
+    check "a token becomes an Authorization header"
+      ((Net.postJsonArgs "https://example.org" "abc").contains "Authorization: Bearer abc"),
+    check "no token means no Authorization header"
+      (postArgs.all (!·.startsWith "Authorization:"))]
 
 /-! ## The protocol -/
 
