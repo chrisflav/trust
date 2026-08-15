@@ -241,6 +241,30 @@ def get (pinned : Pinned) (path : String) (policy : Policy := {}) (accept : Stri
     target]
 
 /--
+The arguments `postJson` runs curl with.
+
+Split out as a value so that the headers can be asserted on.  Everything else
+here sends `Accept`, and this did not; a header nothing can see is a header
+nothing notices the absence of, which is exactly how that happened.
+-/
+def postJsonArgs (url token : String) (policy : Policy := {}) : Array String :=
+  let auth := if token.isEmpty then #[] else #["-H", s!"Authorization: Bearer {token}"]
+  #[
+    "-sS", "--no-location", "-X", "POST", url,
+    "-H", "Content-Type: application/json",
+    -- Says what this will *read*, not what it sends, and the two are separate
+    -- headers.  Without it GitHub's token endpoint answers a successful
+    -- exchange in `application/x-www-form-urlencoded` —
+    -- `access_token=gho_…&scope=&token_type=bearer` — which is its documented
+    -- default and which no JSON parser can read.  The caller then sees a
+    -- response with no `access_token` in it and cannot tell a wrong secret from
+    -- a right one.
+    "-H", "Accept: application/json",
+    "--max-filesize", toString policy.maxResponseBytes,
+    "--max-time", toString ((policy.timeoutMs + 999) / 1000),
+    "-w", "\n%{http_code}"] ++ auth ++ #["--data-binary", "@-"]
+
+/--
 Send JSON to a URL.
 
 Not pinned: this is the CLI publishing to a server the person running it named,
@@ -248,14 +272,8 @@ which is a different question from a node deciding whom to relay to.  The body
 goes in on stdin, so a note holding a quote or a newline can never be read as
 another argument.
 -/
-def postJson (url token body : String) (policy : Policy := {}) : IO (Except String Response) := do
-  let auth := if token.isEmpty then #[] else #["-H", s!"Authorization: Bearer {token}"]
-  runCurl (#[
-    "-sS", "--no-location", "-X", "POST", url,
-    "-H", "Content-Type: application/json",
-    "--max-filesize", toString policy.maxResponseBytes,
-    "--max-time", toString ((policy.timeoutMs + 999) / 1000),
-    "-w", "\n%{http_code}"] ++ auth ++ #["--data-binary", "@-"]) body
+def postJson (url token body : String) (policy : Policy := {}) : IO (Except String Response) :=
+  runCurl (postJsonArgs url token policy) body
 
 /-- Fetch a URL the caller chose, with no pinning.  For the CLI, never for a node. -/
 def getUrl (url : String) (policy : Policy := {}) : IO (Except String Response) :=
