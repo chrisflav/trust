@@ -15,7 +15,7 @@
    "type": "git",
    "subDir": null,
    "scope": "",
-   "rev": "41f8b2183831f225640daa43f76f469329408e8e",
+   "rev": "ed5889213660460497e239fd12fe0ddf5382394f",
    "name": "aftk",
    "manifestFile": "lake-manifest.json",
    "inputRev": "main",

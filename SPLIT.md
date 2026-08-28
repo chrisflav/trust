@@ -28,7 +28,7 @@ already has.
 
 ## 1. What Lean can do today
 
-Checked against the toolchain this repository pins, `leanprover/lean4:v4.32.0`,
+Checked against the toolchain this repository pinned then, `leanprover/lean4:v4.32.0`,
 rather than from memory.  `Std` has grown most of a server runtime:
 
 | need | today | in Lean | status |

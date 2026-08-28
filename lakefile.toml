@@ -3,6 +3,11 @@ version = "0.1.0"
 defaultTargets = ["trust"]
 testDriver = "tests"
 
+# Tracked at `main`, which declares a *later* Lean than this repository pins:
+# `lake update` therefore rewrites `lean-toolchain` to aftk's, and the rc has to
+# be put back by hand afterwards.  Its source builds here regardless — what a
+# dependency's `lean-toolchain` decides is the toolchain lake resolves, not the
+# Lean its source needs.
 [[require]]
 name = "aftk"
 git = "https://github.com/mathlib-initiative/aftk"
@@ -15,6 +20,11 @@ rev = "main"
 # is one commit behind the on-demand proof-irrelevant hash, which the hasher we
 # do not have yet will want.  `runFor`, the one entry point used today, is the
 # same function at both revisions.
+#
+# That pin is now also older than this repository's Lean — semantic_hash has
+# released nothing past `v4.32.0` — and it compiles here anyway.  A hash has to
+# stay the hash it was, so this moves when a certificate's meaning is meant to
+# move, and not when a toolchain does.
 [[require]]
 name = "semantic_hash"
 git = "https://github.com/mathlib-initiative/semantic_hash"
