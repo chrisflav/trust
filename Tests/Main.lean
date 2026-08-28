@@ -430,6 +430,39 @@ def acceptanceTests : IO (Array Outcome) := do
       eq "and the withdrawals that survived" (report.revocations, keptRevs.size) (1, 1),
       check "every refusal has a reason" (report.reasons.size == 5)]
 
+/-! ## Export options
+
+Every other export option trades size for detail, and getting one wrong costs a
+re-export.  Proof edges are different: leaving them out is a claim about what a
+theorem rests on, so the default, and the fact that asking for them also asks
+for the file they go in, are worth pinning down.
+-/
+
+def exportTests : Suite := do
+  let base := ["--repo", "core", "Init"]
+  let config (args : List String) : Option ExportConfig :=
+    match parseExport args with
+    | .ok (config, _) => some config
+    | .error _ => none
+  let has (args : List String) (p : ExportConfig → Bool) : Bool :=
+    match config args with
+    | some config => p config
+    | none => false
+  return #[
+    check "an export writes no body edges, and no proof edges, unless asked"
+      (has base fun c => !c.bodyEdges && !c.withProofs),
+    check "--with-bodies still stops at proofs"
+      (has ("--with-bodies" :: base) fun c => c.bodyEdges && !c.withProofs),
+    check "--with-proofs asks for the file the proof edges go in"
+      (has ("--with-proofs" :: base) fun c => c.bodyEdges && c.withProofs),
+    check "both together are the same thing"
+      (has ("--with-bodies" :: "--with-proofs" :: base) fun c =>
+        c.bodyEdges && c.withProofs),
+    check "a misspelling is refused rather than silently ignored"
+      (match parseExport ("--with-proof" :: base) with
+       | .error _ => true
+       | .ok _ => false)]
+
 /-! ## The committed vectors
 
 `conformance/` is what binds the browser's implementation to this one now that
@@ -451,7 +484,7 @@ open Tests in
 def main : IO UInt32 := do
   let suites : List (String × Suite) :=
     [("timestamps", timeTests), ("canonical bytes", canonicalTests),
-     ("conformance vectors", conformanceTests),
+     ("conformance vectors", conformanceTests), ("export options", exportTests),
      ("addresses (§5.4)", netTests), ("the protocol", federationTests),
      ("acceptance (§3.4, §6)", acceptanceTests),
      ("signatures", signatureTests)]

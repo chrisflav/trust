@@ -15,8 +15,11 @@ per-declaration transitive closures would be quadratic in the size of the
 library, while both dependency directions are a cheap breadth-first search over
 the direct relation once it is loaded in the browser.
 
-Statement edges are always written.  Body edges — which are far more numerous,
-since they include every constant used in every proof term — are opt-in.
+Statement edges are always written.  Body edges are opt-in, and stop at proofs:
+what a proof term happens to mention is not something the theorem rests on, only
+its statement is.  `withProofs` lifts that stop for a reader who is asking the
+other question — not what a theorem rests on but what its proof actually used —
+and pays for it, since for Lean core the proof edges are 89% of the body edges.
 -/
 
 namespace Trust
@@ -33,8 +36,18 @@ structure ExportConfig where
   outDir : System.FilePath
   /-- Restrict exported declarations to matching modules.  Empty means all. -/
   filter : AFTK.ModuleFilter := {}
-  /-- Also export body edges, i.e. dependencies arising from proof terms. -/
+  /-- Also export body edges, i.e. the constants a definition's value mentions. -/
   withBodies : Bool := false
+  /--
+  Also export the edges of proof terms, which `withBodies` alone stops at.
+
+  Off by default, and that default is a claim about meaning rather than a
+  saving: a theorem rests on its statement, not on whatever closed it.  Turning
+  this on answers the other question — what a proof used — and costs what the
+  rule saves, 89% of the body edges for Lean core.  Implies `withBodies`,
+  because proof edges are body edges and go in the same file.
+  -/
+  withProofs : Bool := false
   /-- Skip `MetaM` `Prop` checks, treating exactly the theorems as proofs. -/
   fastProp : Bool := false
   /-- Also export rendered, clickable source for every declaration. -/
@@ -49,6 +62,16 @@ structure ExportConfig where
   -/
   withHashes : Bool := false
   deriving Inhabited
+
+/--
+Whether any body edges are written at all.
+
+Proof edges are body edges, so asking for them is asking for the file they go
+in: `withProofs` on its own would otherwise produce an index carrying body edges
+for theorems and none for definitions, which is nobody's question.
+-/
+def ExportConfig.bodyEdges (config : ExportConfig) : Bool :=
+  config.withBodies || config.withProofs
 
 /--
 Append a 32-bit little-endian integer.
@@ -239,11 +262,12 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
           if stmtBuf.size ≥ edgeFlushBytes then
             stmtHandle.write stmtBuf
             stmtBuf := .empty
-      -- A proof's body is never walked, in either direction: what a proof term
+      -- A proof's body is not walked, in either direction: what a proof term
       -- happens to mention is not something the theorem rests on, only the
       -- statement is.  Writing those edges anyway cost 89% of this file for
-      -- data no reader of the index can reach.
-      if config.withBodies && !isProp then
+      -- data no reader of the index could reach.  `withProofs` is for the reader
+      -- who wants precisely that data, and who has to ask.
+      if config.bodyEdges && (config.withProofs || !isProp) then
         for dep in displayableSuccessors env (bodyConstants env) declName do
           if let some tgt := ids[dep]? then
             bodyBuf := pushInt32LE (pushInt32LE bodyBuf i) tgt
@@ -285,7 +309,12 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
     -- is slow enough for anyone to watch the bar.  This is the last point at
     -- which the true figure is known for certain.
     ("declBytes", declBytes),
-    ("hasBodyEdges", config.withBodies),
+    ("hasBodyEdges", config.bodyEdges),
+    -- Whether the body edges include proof terms, which changes what an edge
+    -- means: with these in, a theorem is a dependent of everything its proof
+    -- touched.  Nothing in the edge files distinguishes the two kinds of index,
+    -- so this is where it is said.
+    ("hasProofEdges", config.withProofs),
     ("hasCode", config.withCode),
     ("hasHashes", config.withHashes),
     ("hasher", if config.withHashes then defaultHasher.name else ""),
@@ -294,7 +323,8 @@ def runExport (env : Environment) (config : ExportConfig) : IO Unit := do
     ("edgeFormat", "i32le")
   ]
   IO.FS.writeFile (dir / "meta.json") (metaJson.pretty ++ "\n")
+  let proofNote := if config.withProofs then " (proof terms included)" else ""
   IO.eprintln s!"trust: wrote {declarations.size} declarations, {stmtEdges} statement edges, \
-{bodyEdges} body edges to {dir}"
+{bodyEdges} body edges{proofNote} to {dir}"
 
 end Trust

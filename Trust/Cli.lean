@@ -78,7 +78,11 @@ Options for export:
   --rev <rev>          Revision string recorded in meta.json.
   --marks <path>       Marks file to carry into the index.  Default: trust-marks.json.
   -m, --module <pat>   Restrict exported declarations to matching modules.
-      --with-bodies    Also export body (proof-term) edges.
+      --with-bodies    Also export body edges: what a definition's value mentions.
+                       Proofs are leaves, so a theorem contributes none.
+      --with-proofs    Also export the edges of proof terms, which --with-bodies
+                       stops at.  Implies --with-bodies, and is not small: for
+                       Lean core these are 89% of the body edges.
       --with-code      Also export rendered, clickable declaration source.
       --with-hashes    Also record each declaration's semantic hash, so the index
                        can be matched against trust certificates.
@@ -200,6 +204,7 @@ where
       else
         .ok (config, positionals[0]!)
     | "--with-bodies" :: rest => go rest { config with withBodies := true } positionals
+    | "--with-proofs" :: rest => go rest { config with withProofs := true } positionals
     | "--fast-prop" :: rest => go rest { config with fastProp := true } positionals
     | "--with-code" :: rest => go rest { config with withCode := true } positionals
     | "--with-hashes" :: rest => go rest { config with withHashes := true } positionals

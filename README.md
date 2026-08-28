@@ -138,11 +138,27 @@ The frontend reads a precomputed static index.  Generate one:
 `--with-bodies` also exports the edges that come from definition bodies.  Without
 it, definitions do not unfold in the UI.
 
-Proof terms are *not* exported, in either direction.  A proof is a leaf: what a
-proof term happens to mention is not something the theorem rests on — only its
-statement is — so a theorem shows the dependencies of its statement and nothing
-else, and never turns up as a dependent of a declaration its proof merely
-touched.  For Lean core that rule is 89% of the body edges.
+Proof terms are *not* exported by default, in either direction.  A proof is a
+leaf: what a proof term happens to mention is not something the theorem rests on
+— only its statement is — so a theorem shows the dependencies of its statement
+and nothing else, and never turns up as a dependent of a declaration its proof
+merely touched.  For Lean core that rule is 89% of the body edges.
+
+`--with-proofs` lifts it, for the reader asking the other question — not what a
+theorem rests on, but what its proof actually used:
+
+```bash
+./.lake/build/bin/trust export --repo core --out index --with-proofs --with-code Init
+```
+
+It implies `--with-bodies`, since proof edges are body edges and go in the same
+file, and it costs about what the rule saves: for Lean core the body edges go
+from 93,335 to 875,271, nine times as many, and the export from three seconds to
+seven.  The consequence is worth stating, because it runs in both directions:
+with proof edges in the index a theorem *does* turn up as a dependent of
+everything its proof touched, which is the point of the flag and also why it is
+not the default.  An index says which kind it is in `meta.json`, as `hasProofEdges`;
+nothing in the edge files themselves distinguishes the two.
 
 `--with-code` exports the rendered declarations that the UI displays and makes
 clickable.  It is sharded under `code/` and fetched on demand, since it is the
@@ -189,6 +205,11 @@ exported without them cannot be given them afterwards, and what they answer is
 whether a declaration is still the one a certificate was issued for, a question
 that only arrives later (`with-hashes: 'false'` for an index that will only be
 read).
+
+Proof edges are not among them, as they are not among `trust export`'s defaults;
+`with-proofs: 'true'` is the action's spelling of the flag above, and needs a
+`trust` that has it — the action refuses the pair rather than letting the
+exporter fail on an unknown option.
 
 The remaining inputs, the outputs and the rest of it are documented in [that
 repository's README](https://github.com/chrisflav/trust-action#inputs).  Worth
@@ -268,7 +289,8 @@ lake env /path/to/trust/.lake/build/bin/trust sync-marks \
 meta.json         schema version, counts, revision
 decls.jsonl       one JSON object per declaration, id-ordered
 stmt-edges.bin    flat little-endian int32 (src, tgt) pairs
-body-edges.bin    the same, for definition bodies (never for proof terms)
+body-edges.bin    the same, for definition bodies (and for proof terms, with
+                  --with-proofs)
 code/<n>.jsonl    rendered declarations, 2000 per shard
 marks.json        human judgements, with protection resolved (when any exist)
 ```

@@ -58,6 +58,19 @@ jobs:
           test "$DECLS" -gt 1000
           test -s "$RUNNER_TEMP/index/core/code/0.jsonl"
 
+          # `--with-proofs` is the one export option that changes what an edge
+          # *means* rather than how many there are, and nothing in the edge file
+          # shows which kind an index holds — so the check is that it really
+          # adds the proof edges the default leaves out, and says that it did.
+          lake env ./.lake/build/bin/trust export \
+            --repo core-proofs --out "$RUNNER_TEMP/index" --with-proofs Init
+          WITHOUT="$(jq .bodyEdgeCount "$RUNNER_TEMP/index/core/meta.json")"
+          WITH="$(jq .bodyEdgeCount "$RUNNER_TEMP/index/core-proofs/meta.json")"
+          echo "body edges: $WITHOUT without proof terms, $WITH with"
+          test "$WITH" -gt "$WITHOUT"
+          test "$(jq .hasProofEdges "$RUNNER_TEMP/index/core-proofs/meta.json")" = true
+          test "$(jq .hasProofEdges "$RUNNER_TEMP/index/core/meta.json")" = false
+
       - name: Check the conformance vectors against this implementation
         run: ./.lake/build/bin/trust conformance --check
 
