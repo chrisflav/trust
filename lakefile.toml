@@ -3,10 +3,12 @@ version = "0.1.0"
 defaultTargets = ["trust"]
 testDriver = "tests"
 
-# Tracked at `main`, which declares a *later* Lean than this repository pins:
-# `lake update` therefore rewrites `lean-toolchain` to aftk's, and the rc has to
-# be put back by hand afterwards.  Its source builds here regardless — what a
-# dependency's `lean-toolchain` decides is the toolchain lake resolves, not the
+# Tracked at `main`, which decides more than it looks like: lake resolves a
+# workspace's toolchain from its dependencies, so `lake update` rewrites
+# `lean-toolchain` to aftk's whenever aftk is ahead — which is how this
+# repository arrived at v4.33.0, and what a bump to a release candidate has to
+# be put back by hand afterwards.  aftk's source builds under either, since what
+# a dependency's `lean-toolchain` decides is the toolchain lake picks, not the
 # Lean its source needs.
 [[require]]
 name = "aftk"
