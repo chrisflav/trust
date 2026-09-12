@@ -6,10 +6,12 @@ testDriver = "tests"
 # Tracked at `main`, which decides more than it looks like: lake resolves a
 # workspace's toolchain from its dependencies, so `lake update` rewrites
 # `lean-toolchain` to aftk's whenever aftk is ahead — which is how this
-# repository arrived at v4.33.0, and what a bump to a release candidate has to
-# be put back by hand afterwards.  aftk's source builds under either, since what
-# a dependency's `lean-toolchain` decides is the toolchain lake picks, not the
-# Lean its source needs.
+# repository arrived at v4.33.0, and what a bump past aftk has to be put back by
+# hand afterwards.  That is the standing case now rather than the exception:
+# this pins v4.33.1 and aftk's main still declares v4.33.0, so `lake update`
+# would walk the toolchain backwards.  aftk's source builds under either, since
+# what a dependency's `lean-toolchain` decides is the toolchain lake picks, not
+# the Lean its source needs.
 [[require]]
 name = "aftk"
 git = "https://github.com/mathlib-initiative/aftk"

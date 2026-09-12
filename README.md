@@ -221,11 +221,10 @@ gate the build on protected declarations without building `trust` twice.
 Nothing in the workflow above names a version of `trust`, and that is the point.
 An exporter can only read the `.olean` files of the Lean it was built on, so a
 release of `trust` is a release *for* a toolchain and its tag says which:
-`v4.31.0`, `v4.32.0`, `v4.33.0-rc2`, `v4.33.0`.  The action reads your
-`lean-toolchain`
-and takes the tag of that name, which means bumping Lean is one edit rather
-than two.  Its `trust-ref` input is there for when you would rather say it
-yourself.
+`v4.31.0`, `v4.32.0`, `v4.33.0-rc2`, `v4.33.0`, `v4.33.1`.  The action reads
+your `lean-toolchain` and takes the tag of that name, which means bumping Lean
+is one edit rather than two.  Its `trust-ref` input is there for when you would
+rather say it yourself.
 
 That is also why the action is a separate repository: it is versioned by its own
 inputs and outputs, this is versioned by Lean, and holding them together made
@@ -234,7 +233,7 @@ every caller name one ref for both.
 > [!WARNING]
 > A `.olean` file can only be read by the exact Lean version that wrote it, so
 > `trust` can only index a library on **its own toolchain** — this one is
-> `leanprover/lean4:v4.33.0`.  The action compares the two `lean-toolchain`
+> `leanprover/lean4:v4.33.1`.  The action compares the two `lean-toolchain`
 > files and stops there, naming both versions, rather than letting it fail
 > somewhere inside Lean with a message about a module header.
 >
@@ -249,8 +248,8 @@ Because the tag is the whole of the mapping, cutting a release is naming it
 after the toolchain the release was built on:
 
 ```bash
-git tag -a v4.33.0 -m "trust for Lean v4.33.0"
-git push origin v4.33.0
+git tag -a v4.33.1 -m "trust for Lean v4.33.1"
+git push origin v4.33.1
 ```
 
 A release candidate is a toolchain like any other, and gets a tag of its own:
